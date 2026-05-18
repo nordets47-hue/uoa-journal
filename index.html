@@ -543,29 +543,56 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
 
 <!-- ===== DONNÉES ===== -->
 <div id="panel-data" class="panel">
-  <div class="card">
-    <p class="sec-label">Export / Import</p>
+
+  <div class="card" id="sheets-config-card">
+    <p class="sec-label">🔗 Synchronisation Google Sheets</p>
     <p style="font-size:13px;color:var(--text2);margin-bottom:1rem;line-height:1.6">
-      Exporte tes données régulièrement comme backup. L'import te permet de restaurer ou de transférer tes données entre appareils.
+      Colle l'URL de ton Google Apps Script Web App ici pour synchroniser automatiquement entre tous tes appareils.
+    </p>
+    <div class="field" style="margin-bottom:10px">
+      <label>URL du Web App (Apps Script)</label>
+      <input type="url" id="sheets-url" placeholder="https://script.google.com/macros/s/…/exec" style="font-size:12px">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-accent" onclick="saveSheetUrl()">✓ Sauvegarder l'URL</button>
+      <button class="btn" onclick="testConnection()">⚡ Tester la connexion</button>
+      <span id="conn-status" style="font-size:12px;font-family:var(--mono)"></span>
+    </div>
+    <div id="sync-status-bar" style="margin-top:10px;font-size:12px;color:var(--text3);font-family:var(--mono);display:none"></div>
+  </div>
+
+  <div class="card">
+    <p class="sec-label">Synchronisation manuelle</p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1rem;line-height:1.6">
+      La sync est automatique à chaque ajout/suppression. Tu peux aussi forcer une sync complète ici.
     </p>
     <div class="data-actions">
-      <button class="btn btn-accent" onclick="exportJSON()">⬇ Exporter JSON (backup)</button>
-      <button class="btn" onclick="exportCSV()">⬇ Exporter CSV (Excel)</button>
+      <button class="btn btn-accent" onclick="forcePull()">⬇ Charger depuis Sheets</button>
+      <button class="btn" onclick="forcePush()">⬆ Envoyer vers Sheets</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="sec-label">Export local</p>
+    <div class="data-actions">
+      <button class="btn" onclick="exportJSON()">⬇ Backup JSON</button>
+      <button class="btn" onclick="exportCSV()">⬇ Export CSV (Excel)</button>
       <button class="btn" onclick="document.getElementById('import-file').click()">⬆ Importer JSON</button>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importJSON(event)">
     </div>
   </div>
+
   <div class="card">
     <p class="sec-label">Danger zone</p>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">Supprime toutes les données du journal. Cette action est irréversible.</p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">Supprime toutes les données locales et dans Sheets.</p>
     <button class="btn" style="color:var(--red);border-color:rgba(255,94,94,0.3)" onclick="clearAll()">🗑 Tout effacer</button>
   </div>
+
   <div class="card">
     <p class="sec-label">À propos</p>
     <p style="font-size:13px;color:var(--text2);line-height:1.7">
-      UOA Journal v1.0 — Outil de simulation et suivi de trades basés sur l'activité d'options inhabituelles (Unusual Options Activity).<br><br>
-      Les données sont sauvegardées localement dans ton navigateur. Exporte en JSON pour transférer entre appareils.<br><br>
-      <span style="color:var(--text3)">Cet outil est à des fins éducatives et de simulation seulement. Pas un conseil financier.</span>
+      UOA Journal v2.0 — Suivi de trades UOA avec sync Google Sheets.<br><br>
+      <span style="color:var(--text3)">Outil éducatif et de simulation seulement. Pas un conseil financier.</span>
     </p>
   </div>
 </div>
@@ -636,6 +663,7 @@ function saveTrade() {
 
   trades.push(trade);
   saveData();
+  pushToSheets(trade, 'save');
 
   ['f-ticker','f-entry','f-current','f-qty','f-voloi','f-notes','f-retro','f-catalyst-date'].forEach(id => {
     document.getElementById(id).value = '';
@@ -743,6 +771,7 @@ function deleteTrade(id) {
   if(!confirm('Supprimer ce trade ?')) return;
   trades = trades.filter(t => t.id !== id);
   saveData();
+  pushDeleteToSheets(id);
   renderJournal();
   showToast('Trade supprimé');
 }
@@ -870,6 +899,119 @@ function renderBreakdown(containerId, closed, labels, keyFn) {
     </table></div>`;
 }
 
+// ── GOOGLE SHEETS SYNC ──
+const SHEET_URL_KEY = 'uoa_sheet_url';
+let sheetUrl = '';
+
+function loadSheetUrl() {
+  sheetUrl = localStorage.getItem(SHEET_URL_KEY) || '';
+  if(sheetUrl) document.getElementById('sheets-url').value = sheetUrl;
+}
+
+function saveSheetUrl() {
+  sheetUrl = document.getElementById('sheets-url').value.trim();
+  localStorage.setItem(SHEET_URL_KEY, sheetUrl);
+  showToast('✓ URL sauvegardée');
+  setSyncStatus('URL configurée — prêt à synchroniser', 'var(--green)');
+}
+
+function setSyncStatus(msg, color) {
+  const el = document.getElementById('sync-status-bar');
+  el.style.display = 'block';
+  el.style.color = color || 'var(--text3)';
+  el.textContent = msg;
+}
+
+async function testConnection() {
+  if(!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+  const el = document.getElementById('conn-status');
+  el.style.color = 'var(--text3)';
+  el.textContent = '⏳ Test en cours...';
+  try {
+    const resp = await fetch(sheetUrl, { method: 'GET' });
+    const data = await resp.json();
+    if(data.trades !== undefined) {
+      el.style.color = 'var(--green)';
+      el.textContent = '✓ Connexion OK — ' + data.trades.length + ' trades dans Sheets';
+    } else {
+      throw new Error('Réponse inattendue');
+    }
+  } catch(e) {
+    el.style.color = 'var(--red)';
+    el.textContent = '✗ Erreur : ' + e.message;
+  }
+}
+
+async function pushToSheets(trade, action) {
+  if(!sheetUrl) return;
+  try {
+    setSyncStatus('⏳ Sync en cours...', 'var(--text3)');
+    await fetch(sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action, trade, id: trade ? trade.id : undefined }),
+      headers: { 'Content-Type': 'text/plain' }
+    });
+    setSyncStatus('✓ Synchronisé — ' + new Date().toLocaleTimeString('fr-CA'), 'var(--green)');
+  } catch(e) {
+    setSyncStatus('⚠ Sync échouée : ' + e.message, 'var(--amber)');
+  }
+}
+
+async function pushDeleteToSheets(id) {
+  if(!sheetUrl) return;
+  try {
+    await fetch(sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'delete', id }),
+      headers: { 'Content-Type': 'text/plain' }
+    });
+    setSyncStatus('✓ Suppression synchronisée', 'var(--green)');
+  } catch(e) {
+    setSyncStatus('⚠ Sync échouée', 'var(--amber)');
+  }
+}
+
+async function forcePull() {
+  if(!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+  setSyncStatus('⏳ Chargement depuis Sheets...', 'var(--text3)');
+  try {
+    const resp = await fetch(sheetUrl + '?t=' + Date.now());
+    const data = await resp.json();
+    if(data.trades) {
+      trades = data.trades.map(t => ({
+        ...t,
+        id: Number(t.id),
+        entry: t.entry ? parseFloat(t.entry) : null,
+        current: t.current ? parseFloat(t.current) : null,
+        qty: t.qty ? parseInt(t.qty) : null,
+        voloi: t.voloi ? parseFloat(t.voloi) : null,
+      }));
+      saveData();
+      setSyncStatus('✓ ' + trades.length + ' trades chargés depuis Sheets', 'var(--green)');
+      showToast('✓ ' + trades.length + ' trades chargés');
+      renderJournal();
+    }
+  } catch(e) {
+    setSyncStatus('✗ Erreur chargement : ' + e.message, 'var(--red)');
+  }
+}
+
+async function forcePush() {
+  if(!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+  setSyncStatus('⏳ Envoi vers Sheets...', 'var(--text3)');
+  try {
+    await fetch(sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'sync', trades }),
+      headers: { 'Content-Type': 'text/plain' }
+    });
+    setSyncStatus('✓ ' + trades.length + ' trades envoyés vers Sheets', 'var(--green)');
+    showToast('✓ Sync complète envoyée');
+  } catch(e) {
+    setSyncStatus('✗ Erreur envoi : ' + e.message, 'var(--red)');
+  }
+}
+
 // ── EXPORT / IMPORT ──
 function exportJSON() {
   const blob = new Blob([JSON.stringify(trades, null, 2)], {type:'application/json'});
@@ -942,6 +1084,7 @@ function showToast(msg, isError) {
 
 // ── INIT ──
 loadData();
+loadSheetUrl();
 </script>
 </body>
 </html>
