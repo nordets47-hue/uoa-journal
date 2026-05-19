@@ -63,6 +63,16 @@ body {
 }
 .logo span { color: var(--text3); }
 
+/* CLOCK */
+.header-clock {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: .06em;
+  display: flex; flex-direction: column; align-items: flex-end; line-height: 1.4;
+}
+.header-clock .clock-time { color: var(--text2); font-size: 13px; }
+
 /* TABS */
 .nav-tabs {
   display: flex; gap: 2px;
@@ -187,7 +197,7 @@ input::placeholder, textarea::placeholder { color: var(--text3); }
 
 /* TABLE */
 .table-wrap { overflow-x: auto; border-radius: var(--radius-lg); border: 1px solid var(--border); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 700px; }
 thead { background: var(--bg3); }
 th {
   font-family: var(--mono);
@@ -233,6 +243,23 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
 .b-closed{ background: rgba(255,255,255,0.05); color: var(--text2); border: 1px solid var(--border); }
 .b-win   { background: var(--green-bg); color: var(--green); border: 1px solid rgba(46,204,122,0.25); }
 .b-loss  { background: var(--red-bg);   color: var(--red);   border: 1px solid rgba(255,94,94,0.25); }
+.b-alert { background: rgba(255,179,71,0.2); color: var(--amber); border: 1px solid rgba(255,179,71,0.4); animation: pulse-badge 2s infinite; }
+
+@keyframes pulse-badge {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* PRIX LIVE */
+.price-live {
+  display: flex; flex-direction: column; gap: 1px;
+}
+.price-live .lp { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.price-live .lc { font-family: var(--mono); font-size: 11px; }
+.price-live .lc.pos { color: var(--green); }
+.price-live .lc.neg { color: var(--red); }
+.price-live .lc.neu { color: var(--text3); }
+.price-loading { font-family: var(--mono); font-size: 11px; color: var(--text3); }
 
 /* PNL */
 .pnl-pos { color: var(--green); font-family: var(--mono); font-size: 12px; }
@@ -268,6 +295,18 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   margin-bottom: 1rem;
 }
 .filter-bar input, .filter-bar select { width: auto; flex: 1; min-width: 120px; max-width: 200px; }
+
+/* REFRESH BAR */
+.refresh-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: .75rem;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+.refresh-bar .rf-status { font-family: var(--mono); font-size: 11px; color: var(--text3); flex: 1; }
 
 /* EMPTY STATE */
 .empty-state {
@@ -333,6 +372,23 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   white-space: pre-wrap;
 }
 
+/* ALARM MODAL */
+.alarm-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.alarm-item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.alarm-item.today { border-color: rgba(255,179,71,0.4); background: rgba(255,179,71,0.08); }
+.alarm-item.past  { opacity: 0.5; }
+.alarm-ticker-badge { font-family: var(--mono); font-weight: 700; font-size: 13px; color: var(--accent2); min-width: 60px; }
+.alarm-date  { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+.alarm-cat   { font-size: 12px; color: var(--text2); }
+.alarm-days  { font-family: var(--mono); font-size: 11px; }
+
 /* DATA SECTION */
 .data-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 1rem; }
 
@@ -359,7 +415,21 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
 }
 .toast.show { opacity: 1; }
 
-/* PWA add-to-home banner */
+/* ALARM BELL BADGE */
+.bell-badge {
+  position: relative;
+  display: inline-flex;
+}
+.bell-badge .dot {
+  position: absolute;
+  top: -2px; right: -2px;
+  width: 8px; height: 8px;
+  background: var(--amber);
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+}
+
+/* PWA banner */
 .pwa-banner {
   background: linear-gradient(135deg, rgba(124,111,255,0.15), rgba(165,148,255,0.08));
   border: 1px solid rgba(124,111,255,0.3);
@@ -383,6 +453,16 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
     <button class="nav-tab" onclick="showTab('stats')">Stats</button>
     <button class="nav-tab" onclick="showTab('data')">Données</button>
   </nav>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button class="btn btn-sm bell-badge" id="alarm-btn" onclick="openAlarmModal()" title="Alarmes catalyseur" style="padding:5px 10px">
+      🔔 <span id="alarm-count" style="font-family:var(--mono);font-size:11px"></span>
+      <span class="dot" id="alarm-dot" style="display:none"></span>
+    </button>
+    <div class="header-clock">
+      <span class="clock-time" id="clock-time">--:--:--</span>
+      <span id="clock-date">--- --- ---</span>
+    </div>
+  </div>
 </header>
 
 <main class="main">
@@ -418,11 +498,21 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
     </div>
 
     <p class="sec-label" style="margin-top:.5rem">Signal Barchart</p>
-    <div class="fg2" style="margin-bottom:12px">
+    <div class="fg3" style="margin-bottom:12px">
       <div class="field">
         <label>Vol/OI Ratio</label>
         <input type="number" id="f-voloi" placeholder="ex: 12.5" step="0.1" min="0">
       </div>
+      <div class="field">
+        <label>Volume option (contrats)</label>
+        <input type="number" id="f-opt-volume" placeholder="ex: 4500" step="1" min="0">
+      </div>
+      <div class="field">
+        <label>Open Interest (OI)</label>
+        <input type="number" id="f-opt-oi" placeholder="ex: 320" step="1" min="0">
+      </div>
+    </div>
+    <div class="fg2" style="margin-bottom:12px">
       <div class="field">
         <label>Type UOA</label>
         <select id="f-uoa-type">
@@ -434,6 +524,10 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
           <option value="calls_haussiers">Calls haussiers inhabituels</option>
           <option value="puts_baissiers">Puts baissiers inhabituels</option>
         </select>
+      </div>
+      <div class="field">
+        <label>Prix du strike ($)</label>
+        <input type="number" id="f-strike" placeholder="ex: 45.00" step="0.50" min="0">
       </div>
     </div>
 
@@ -453,10 +547,10 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
       </div>
     </div>
 
-    <p class="sec-label" style="margin-top:.5rem">Catalyst</p>
+    <p class="sec-label" style="margin-top:.5rem">Catalyseur</p>
     <div class="fg2" style="margin-bottom:12px">
       <div class="field">
-        <label>Type de catalyst</label>
+        <label>Type de catalyseur</label>
         <select id="f-catalyst">
           <option value="">-- Aucun --</option>
           <option value="earnings">Earnings</option>
@@ -468,7 +562,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
         </select>
       </div>
       <div class="field">
-        <label>Date catalyst (si connu)</label>
+        <label>Date catalyseur (si connu)</label>
         <input type="date" id="f-catalyst-date">
       </div>
     </div>
@@ -501,7 +595,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
       <option value="closed">Fermé</option>
     </select>
     <select id="filter-catalyst" onchange="renderJournal()">
-      <option value="">Tous catalysts</option>
+      <option value="">Tous catalyseurs</option>
       <option value="earnings">Earnings</option>
       <option value="fda">PDUFA/FDA</option>
       <option value="ma">M&A</option>
@@ -509,6 +603,15 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
       <option value="macro">Macro</option>
     </select>
   </div>
+
+  <!-- Barre refresh prix -->
+  <div class="refresh-bar">
+    <span style="font-size:12px;color:var(--text2)">📊 Prix Yahoo Finance</span>
+    <button class="btn btn-sm btn-accent" onclick="refreshAllPrices()" id="btn-refresh-prices">↻ Refresh prix</button>
+    <button class="btn btn-sm" onclick="toggleAutoRefresh()" id="btn-auto-refresh">⏱ Auto OFF</button>
+    <span class="rf-status" id="rf-status">Dernière mise à jour : —</span>
+  </div>
+
   <div class="table-wrap">
     <table>
       <thead><tr>
@@ -518,9 +621,10 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
         <th>UOA</th>
         <th>Vol/OI</th>
         <th>Entrée</th>
-        <th>Actuel</th>
+        <th>Prix live</th>
         <th>P&L sim.</th>
-        <th>Catalyst</th>
+        <th>Strike</th>
+        <th>Catalyseur</th>
         <th></th>
       </tr></thead>
       <tbody id="journal-body"></tbody>
@@ -532,7 +636,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
 <div id="panel-stats" class="panel">
   <div class="stats-grid" id="stats-grid"></div>
   <div class="card">
-    <p class="sec-label">Corrélation catalyst → résultat</p>
+    <p class="sec-label">Corrélation catalyseur → résultat</p>
     <div id="catalyst-breakdown"></div>
   </div>
   <div class="card">
@@ -591,7 +695,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   <div class="card">
     <p class="sec-label">À propos</p>
     <p style="font-size:13px;color:var(--text2);line-height:1.7">
-      UOA Journal v2.0 — Suivi de trades UOA avec sync Google Sheets.<br><br>
+      UOA Journal v2.2 — Suivi de trades UOA avec prix live Yahoo Finance, strike/Vol/OI option, alarmes catalyseur, et sync Google Sheets.<br><br>
       <span style="color:var(--text3)">Outil éducatif et de simulation seulement. Pas un conseil financier.</span>
     </p>
   </div>
@@ -604,12 +708,46 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   <div class="modal" id="modal-content"></div>
 </div>
 
+<!-- MODAL ALARMES -->
+<div class="modal-overlay" id="alarm-modal-overlay" onclick="closeAlarmModal(event)">
+  <div class="modal" id="alarm-modal-content" style="max-width:480px"></div>
+</div>
+
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
 <script>
 const KEY = 'uoa_journal_v2';
 let trades = [];
+
+// ── CORRECTION BUG DATE FUSEAU HORAIRE (UTC vs local) ──
+// toISOString() retourne UTC, ce qui peut décaler d'un jour au Québec (UTC-4/5)
+// On utilise plutôt les composantes locales directement
+function today() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Formater une date YYYY-MM-DD en format lisible français
+function formatDateFr(dateStr) {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-');
+  const mois = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+  return `${parseInt(d)} ${mois[parseInt(m)-1]} ${y}`;
+}
+
+// Comparer deux dates YYYY-MM-DD, retourne nb de jours (positif = dans le futur)
+function daysFromToday(dateStr) {
+  if (!dateStr) return null;
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const target = new Date(y, m-1, d);
+  const now = new Date();
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - todayDate) / 86400000);
+}
 
 function loadData() {
   try {
@@ -622,11 +760,18 @@ function saveData() {
   try { localStorage.setItem(KEY, JSON.stringify(trades)); } catch(e) {}
 }
 
-function today() {
-  return new Date().toISOString().slice(0,10);
-}
-
 document.getElementById('f-date').value = today();
+
+// ── HORLOGE EN TEMPS RÉEL ──
+function updateClock() {
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false });
+  const dateStr = now.toLocaleDateString('fr-CA', { weekday:'short', day:'numeric', month:'short' });
+  document.getElementById('clock-time').textContent = timeStr;
+  document.getElementById('clock-date').textContent = dateStr;
+}
+updateClock();
+setInterval(updateClock, 1000);
 
 // ── TABS ──
 function showTab(t) {
@@ -636,7 +781,7 @@ function showTab(t) {
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
     el.classList.toggle('active', ['add','journal','stats','data'][i]===t);
   });
-  if(t==='journal') renderJournal();
+  if(t==='journal') { renderJournal(); checkAlarms(); }
   if(t==='stats') renderStats();
 }
 
@@ -654,18 +799,24 @@ function saveTrade() {
     current: parseFloat(document.getElementById('f-current').value) || null,
     qty: parseInt(document.getElementById('f-qty').value) || null,
     voloi: parseFloat(document.getElementById('f-voloi').value) || null,
+    optVolume: parseInt(document.getElementById('f-opt-volume').value) || null,
+    optOI: parseInt(document.getElementById('f-opt-oi').value) || null,
+    strike: parseFloat(document.getElementById('f-strike').value) || null,
     uoaType: document.getElementById('f-uoa-type').value,
     catalyst: document.getElementById('f-catalyst').value,
     catalystDate: document.getElementById('f-catalyst-date').value,
     notes: document.getElementById('f-notes').value,
-    retro: document.getElementById('f-retro').value
+    retro: document.getElementById('f-retro').value,
+    livePrice: null,
+    liveChange: null
   };
 
   trades.push(trade);
   saveData();
   pushToSheets(trade, 'save');
+  checkAlarms();
 
-  ['f-ticker','f-entry','f-current','f-qty','f-voloi','f-notes','f-retro','f-catalyst-date'].forEach(id => {
+  ['f-ticker','f-entry','f-current','f-qty','f-voloi','f-opt-volume','f-opt-oi','f-strike','f-notes','f-retro','f-catalyst-date'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('f-date').value = today();
@@ -696,6 +847,28 @@ function fmtPnl(entry, current, qty) {
   const s = pnl >= 0 ? '+' : '';
   return `<span class="${cls}">${s}${Math.round(pnl)}$ <small>(${s}${pct.toFixed(1)}%)</small></span>`;
 }
+
+// P&L utilisant le prix live si dispo
+function fmtPnlWithStrike(t) {
+  const pnlPrice = t.livePrice || t.current;
+  return fmtPnl(t.entry, pnlPrice, t.qty);
+}
+
+// Cellule Strike : affiche strike, prix actuel/live, et écart %
+function renderStrikeCell(t) {
+  if (!t.strike) return '—';
+  const live = t.livePrice || t.current;
+  const strikeStr = '$' + t.strike.toFixed(2);
+  if (!live) return strikeStr;
+  const diff = live - t.strike;
+  const diffPct = (diff / t.strike * 100);
+  const sign = diffPct >= 0 ? '+' : '';
+  const col = diffPct >= 0 ? 'var(--green)' : 'var(--red)';
+  return `<div style="display:flex;flex-direction:column;gap:1px">
+    <span style="color:var(--text3);font-size:10px">Strike: ${strikeStr}</span>
+    <span style="color:${col};font-size:11px">${sign}${diffPct.toFixed(1)}% vs live</span>
+  </div>`;
+}
 const UOA_LABELS = {
   sweep_calls:'Sweep calls', sweep_puts:'Sweep puts',
   block_calls:'Block calls', block_puts:'Block puts',
@@ -722,6 +895,238 @@ function outcomeBadge(t) {
     : ' <span class="badge b-loss">✗ Loss</span>';
 }
 
+// ── PRIX YAHOO FINANCE ──
+// Proxy CORS public pour contourner la restriction navigateur
+const YAHOO_PROXY = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const CORS_PROXY  = 'https://api.allorigins.win/get?url=';
+
+let priceCache = {};    // { ticker: { price, changePercent, ts } }
+let autoRefreshTimer = null;
+let autoRefreshOn = false;
+
+async function fetchPrice(ticker) {
+  // Cache de 3 min
+  const cached = priceCache[ticker];
+  if (cached && Date.now() - cached.ts < 180000) return cached;
+
+  try {
+    const url = encodeURIComponent(YAHOO_PROXY + ticker + '?interval=1d&range=1d');
+    const resp = await fetch(CORS_PROXY + url);
+    const wrapper = await resp.json();
+    const data = JSON.parse(wrapper.contents);
+    const meta = data.chart.result[0].meta;
+    const price = meta.regularMarketPrice;
+    const prevClose = meta.chartPreviousClose || meta.previousClose || price;
+    const changePercent = prevClose ? (price - prevClose) / prevClose * 100 : 0;
+    const result = { price, changePercent, ts: Date.now() };
+    priceCache[ticker] = result;
+    return result;
+  } catch(e) {
+    return null;
+  }
+}
+
+async function refreshAllPrices() {
+  const btn = document.getElementById('btn-refresh-prices');
+  btn.disabled = true;
+  btn.textContent = '↻ Chargement…';
+  document.getElementById('rf-status').textContent = 'Mise à jour en cours…';
+
+  // Tickers uniques des trades actifs
+  const tickers = [...new Set(trades.map(t => t.ticker))];
+
+  // Invalider le cache pour forcer le refresh
+  tickers.forEach(tk => { if(priceCache[tk]) priceCache[tk].ts = 0; });
+
+  let updated = 0;
+  for (const tk of tickers) {
+    const r = await fetchPrice(tk);
+    if (r) {
+      // Mettre à jour le champ "current" des trades OPEN seulement si pas de prix manuel
+      trades.forEach(t => {
+        if (t.ticker === tk) {
+          t.livePrice = r.price;
+          t.liveChange = r.changePercent;
+        }
+      });
+      updated++;
+    }
+    // Petit délai anti-throttle
+    await new Promise(res => setTimeout(res, 250));
+  }
+
+  saveData();
+  renderJournal();
+  const now = new Date();
+  const ts = now.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  document.getElementById('rf-status').textContent = `Mise à jour ${ts} — ${updated}/${tickers.length} tickers`;
+  btn.disabled = false;
+  btn.textContent = '↻ Refresh prix';
+  showToast(`✓ ${updated} tickers mis à jour`);
+}
+
+function toggleAutoRefresh() {
+  autoRefreshOn = !autoRefreshOn;
+  const btn = document.getElementById('btn-auto-refresh');
+  if (autoRefreshOn) {
+    btn.textContent = '⏱ Auto ON (5min)';
+    btn.style.color = 'var(--green)';
+    autoRefreshTimer = setInterval(refreshAllPrices, 300000); // 5 min
+    refreshAllPrices();
+  } else {
+    btn.textContent = '⏱ Auto OFF';
+    btn.style.color = '';
+    clearInterval(autoRefreshTimer);
+  }
+}
+
+function renderLivePrice(t) {
+  if (!t.livePrice) {
+    return `<span class="price-loading">—</span>`;
+  }
+  const sign = t.liveChange >= 0 ? '+' : '';
+  const cls = t.liveChange > 0 ? 'pos' : t.liveChange < 0 ? 'neg' : 'neu';
+  return `<div class="price-live">
+    <span class="lp">$${t.livePrice.toFixed(2)}</span>
+    <span class="lc ${cls}">${sign}${t.liveChange.toFixed(2)}%</span>
+  </div>`;
+}
+
+// ── ALARMES CATALYST ──
+function checkAlarms() {
+  const today_str = today();
+  const upcoming = trades.filter(t => {
+    if (!t.catalystDate || t.status === 'closed') return false;
+    const days = daysFromToday(t.catalystDate);
+    return days !== null && days >= 0 && days <= 7;
+  });
+
+  const todayAlarms = upcoming.filter(t => daysFromToday(t.catalystDate) === 0);
+  const btn = document.getElementById('alarm-btn');
+  const dot = document.getElementById('alarm-dot');
+  const countEl = document.getElementById('alarm-count');
+
+  if (upcoming.length > 0) {
+    dot.style.display = 'block';
+    countEl.textContent = upcoming.length;
+    btn.style.color = todayAlarms.length > 0 ? 'var(--amber)' : 'var(--text2)';
+  } else {
+    dot.style.display = 'none';
+    countEl.textContent = '';
+    btn.style.color = '';
+  }
+
+  // Notification navigateur pour les alarmes du jour
+  if (todayAlarms.length > 0) {
+    requestNotificationPermission(todayAlarms);
+  }
+}
+
+function requestNotificationPermission(todayAlarms) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    fireAlarmNotifications(todayAlarms);
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') fireAlarmNotifications(todayAlarms);
+    });
+  }
+}
+
+let notifiedToday = new Set();
+function fireAlarmNotifications(alarms) {
+  alarms.forEach(t => {
+    const key = `${t.id}-${today()}`;
+    if (notifiedToday.has(key)) return;
+    notifiedToday.add(key);
+    try {
+      new Notification(`🔔 UOA Journal — ${t.ticker}`, {
+        body: `Catalyseur aujourd'hui : ${catLabel(t.catalyst)}\nTrade en mode ${t.status}`,
+        icon: '',
+        tag: key
+      });
+    } catch(e) {}
+  });
+}
+
+function openAlarmModal() {
+  const all = trades
+    .filter(t => t.catalystDate && t.status !== 'closed')
+    .map(t => ({ ...t, daysLeft: daysFromToday(t.catalystDate) }))
+    .filter(t => t.daysLeft !== null)
+    .sort((a,b) => a.daysLeft - b.daysLeft);
+
+  let html = `
+    <div class="modal-header">
+      <span style="font-family:var(--mono);font-size:16px;color:var(--accent2);">🔔 Alarmes Catalyseur</span>
+      <button class="btn btn-sm" onclick="closeAlarmModal()">✕</button>
+    </div>`;
+
+  if (!all.length) {
+    html += `<p style="font-size:13px;color:var(--text3);text-align:center;padding:2rem 0">
+      Aucun trade actif avec date catalyseur.<br>Ajoute une date catalyseur dans + Trade.
+    </p>`;
+  } else {
+    html += `<div class="alarm-list">`;
+    all.forEach(t => {
+      const isToday = t.daysLeft === 0;
+      const isPast = t.daysLeft < 0;
+      let daysLabel, daysColor;
+      if (isToday) {
+        daysLabel = '📢 AUJOURD\'HUI';
+        daysColor = 'var(--amber)';
+      } else if (isPast) {
+        daysLabel = `Il y a ${Math.abs(t.daysLeft)}j`;
+        daysColor = 'var(--text3)';
+      } else if (t.daysLeft === 1) {
+        daysLabel = '⚠ Demain';
+        daysColor = 'var(--amber)';
+      } else {
+        daysLabel = `Dans ${t.daysLeft}j`;
+        daysColor = t.daysLeft <= 3 ? 'var(--amber)' : 'var(--blue)';
+      }
+
+      html += `<div class="alarm-item ${isToday?'today':''} ${isPast?'past':''}">
+        <span class="alarm-ticker-badge">${t.ticker}</span>
+        <span class="alarm-cat">${catLabel(t.catalyst)} — catalyseur</span>
+        <span class="alarm-date">${formatDateFr(t.catalystDate)}</span>
+        <span class="alarm-days" style="color:${daysColor}">${daysLabel}</span>
+        ${statusBadge(t.status)}
+      </div>`;
+    });
+    html += `</div>`;
+
+    // Résumé
+    const todayCount = all.filter(t => t.daysLeft === 0).length;
+    const soonCount  = all.filter(t => t.daysLeft > 0 && t.daysLeft <= 3).length;
+    if (todayCount || soonCount) {
+      html += `<p style="font-size:12px;color:var(--amber);margin-top:1rem;font-family:var(--mono);text-align:center">
+        ${todayCount ? `⚡ ${todayCount} catalyst aujourd'hui` : ''}
+        ${todayCount && soonCount ? ' · ' : ''}
+        ${soonCount ? `⏳ ${soonCount} dans les 3 prochains jours` : ''}
+      </p>`;
+    }
+
+    // Option activer notifications
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      html += `<div style="margin-top:1rem;text-align:center">
+        <button class="btn btn-sm btn-accent" onclick="Notification.requestPermission().then(p=>{ if(p==='granted') showToast('✓ Notifications activées'); closeAlarmModal(); })">
+          🔔 Activer les notifications navigateur
+        </button>
+      </div>`;
+    }
+  }
+
+  document.getElementById('alarm-modal-content').innerHTML = html;
+  document.getElementById('alarm-modal-overlay').classList.add('open');
+}
+
+function closeAlarmModal(e) {
+  if (!e || e.target === document.getElementById('alarm-modal-overlay')) {
+    document.getElementById('alarm-modal-overlay').classList.remove('open');
+  }
+}
+
 // ── JOURNAL ──
 function renderJournal() {
   const fTicker = (document.getElementById('filter-ticker').value||'').toUpperCase();
@@ -737,7 +1142,7 @@ function renderJournal() {
 
   const tbody = document.getElementById('journal-body');
   if(!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="10">
+    tbody.innerHTML = `<tr><td colspan="11">
       <div class="empty-state">
         <div class="empty-icon">📋</div>
         <p>Aucun trade trouvé.<br>Commence par en ajouter un dans <strong>+ Trade</strong>.</p>
@@ -745,17 +1150,27 @@ function renderJournal() {
     return;
   }
 
-  tbody.innerHTML = filtered.map(t => `
-    <tr>
+  tbody.innerHTML = filtered.map(t => {
+    const days = t.catalystDate ? daysFromToday(t.catalystDate) : null;
+    const alarmBadge = (days !== null && days >= 0 && days <= 1 && t.status !== 'closed')
+      ? ` <span class="badge b-alert">${days===0?'⚡ Aujourd\'hui':'⚠ Demain'}</span>`
+      : '';
+
+    // P&L : utilise le prix live si disponible, sinon le prix "current" manuel
+    const livePx = t.livePrice;
+    const pnlPrice = livePx || t.current;
+
+    return `<tr>
       <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${t.date}</td>
       <td class="ticker-cell">${t.ticker}</td>
       <td>${statusBadge(t.status)}${outcomeBadge(t)}</td>
       <td style="font-size:12px;color:var(--text2)">${uoaLabel(t.uoaType)}</td>
       <td style="font-family:var(--mono);font-size:12px">${t.voloi ? t.voloi.toFixed(1) : '—'}</td>
       <td style="font-family:var(--mono);font-size:12px">${t.entry ? '$'+t.entry.toFixed(2) : '—'}</td>
-      <td style="font-family:var(--mono);font-size:12px">${t.current ? '$'+t.current.toFixed(2) : '—'}</td>
-      <td>${fmtPnl(t.entry, t.current, t.qty)}</td>
-      <td style="font-size:12px;color:var(--text2)">${catLabel(t.catalyst)}</td>
+      <td>${renderLivePrice(t)}</td>
+      <td>${fmtPnlWithStrike(t)}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${renderStrikeCell(t)}</td>
+      <td style="font-size:12px;color:var(--text2)">${catLabel(t.catalyst)}${t.catalystDate ? '<br><span style="font-family:var(--mono);font-size:10px;color:var(--text3)">'+formatDateFr(t.catalystDate)+'</span>' : ''}${alarmBadge}</td>
       <td>
         <div style="display:flex;gap:4px">
           <button class="btn btn-sm btn-icon" onclick="viewTrade(${t.id})" title="Détails">👁</button>
@@ -763,7 +1178,8 @@ function renderJournal() {
           <button class="btn btn-sm btn-icon" onclick="deleteTrade(${t.id})" title="Supprimer" style="color:var(--red)">✕</button>
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 // ── CRUD ──
@@ -773,6 +1189,7 @@ function deleteTrade(id) {
   saveData();
   pushDeleteToSheets(id);
   renderJournal();
+  checkAlarms();
   showToast('Trade supprimé');
 }
 
@@ -786,6 +1203,9 @@ function editTrade(id) {
   document.getElementById('f-current').value = t.current || '';
   document.getElementById('f-qty').value = t.qty || '';
   document.getElementById('f-voloi').value = t.voloi || '';
+  document.getElementById('f-opt-volume').value = t.optVolume || '';
+  document.getElementById('f-opt-oi').value = t.optOI || '';
+  document.getElementById('f-strike').value = t.strike || '';
   document.getElementById('f-uoa-type').value = t.uoaType || '';
   document.getElementById('f-catalyst').value = t.catalyst || '';
   document.getElementById('f-catalyst-date').value = t.catalystDate || '';
@@ -801,11 +1221,45 @@ function editTrade(id) {
 function viewTrade(id) {
   const t = trades.find(x => x.id === id);
   if(!t) return;
-  const pnl = calcPnl(t.entry, t.current, t.qty);
-  const pct = calcPct(t.entry, t.current);
+  const pnl = calcPnl(t.entry, t.livePrice || t.current, t.qty);
+  const pct = calcPct(t.entry, t.livePrice || t.current);
   const pnlStr = pnl !== null
     ? `<span class="${pnl>=0?'pnl-pos':'pnl-neg'}">${pnl>=0?'+':''}${Math.round(pnl)}$ (${pct>=0?'+':''}${pct.toFixed(1)}%)</span>`
     : '—';
+
+  const days = t.catalystDate ? daysFromToday(t.catalystDate) : null;
+  let catalystInfo = catLabel(t.catalyst);
+  if (t.catalystDate) {
+    catalystInfo += ` — ${formatDateFr(t.catalystDate)}`;
+    if (days !== null) {
+      if (days === 0) catalystInfo += ' <span class="badge b-alert">Aujourd\'hui</span>';
+      else if (days > 0) catalystInfo += ` <span style="color:var(--text3);font-size:11px">(dans ${days}j)</span>`;
+      else catalystInfo += ` <span style="color:var(--text3);font-size:11px">(il y a ${Math.abs(days)}j)</span>`;
+    }
+  }
+
+  const livePriceRow = t.livePrice
+    ? `<div class="modal-row">
+        <span class="modal-key">Prix live Yahoo</span>
+        <span class="modal-val" style="font-family:var(--mono)">$${t.livePrice.toFixed(2)}
+          <span class="${t.liveChange>=0?'pnl-pos':'pnl-neg'}" style="font-size:12px;margin-left:6px">${t.liveChange>=0?'+':''}${t.liveChange.toFixed(2)}%</span>
+        </span>
+      </div>` : '';
+
+  const strikeDiff = (t.strike && (t.livePrice || t.current))
+    ? (() => {
+        const live = t.livePrice || t.current;
+        const d = (live - t.strike) / t.strike * 100;
+        const s = d >= 0 ? '+' : '';
+        return ` <span class="${d>=0?'pnl-pos':'pnl-neg'}" style="font-size:12px">${s}${d.toFixed(1)}% vs live</span>`;
+      })() : '';
+
+  const optVolumeRow = t.optVolume
+    ? `<div class="modal-row"><span class="modal-key">Volume option</span><span class="modal-val" style="font-family:var(--mono)">${t.optVolume.toLocaleString('fr-CA')} contrats</span></div>`
+    : '';
+  const optOIRow = t.optOI
+    ? `<div class="modal-row"><span class="modal-key">Open Interest</span><span class="modal-val" style="font-family:var(--mono)">${t.optOI.toLocaleString('fr-CA')}</span></div>`
+    : '';
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-header">
@@ -815,14 +1269,18 @@ function viewTrade(id) {
         <button class="btn btn-sm" onclick="closeModal()">✕</button>
       </div>
     </div>
-    <div class="modal-row"><span class="modal-key">Date signal</span><span class="modal-val">${t.date}</span></div>
+    <div class="modal-row"><span class="modal-key">Date signal</span><span class="modal-val">${formatDateFr(t.date)}</span></div>
     <div class="modal-row"><span class="modal-key">Type UOA</span><span class="modal-val">${uoaLabel(t.uoaType)}</span></div>
     <div class="modal-row"><span class="modal-key">Vol/OI Ratio</span><span class="modal-val" style="font-family:var(--mono)">${t.voloi ? t.voloi.toFixed(1) : '—'}</span></div>
+    ${optVolumeRow}
+    ${optOIRow}
+    <div class="modal-row"><span class="modal-key">Prix strike</span><span class="modal-val" style="font-family:var(--mono)">${t.strike ? '$'+t.strike.toFixed(2)+strikeDiff : '—'}</span></div>
     <div class="modal-row"><span class="modal-key">Prix entrée</span><span class="modal-val" style="font-family:var(--mono)">${t.entry ? '$'+t.entry.toFixed(2) : '—'}</span></div>
-    <div class="modal-row"><span class="modal-key">Prix actuel/sortie</span><span class="modal-val" style="font-family:var(--mono)">${t.current ? '$'+t.current.toFixed(2) : '—'}</span></div>
+    ${livePriceRow}
+    <div class="modal-row"><span class="modal-key">Prix manuel/sortie</span><span class="modal-val" style="font-family:var(--mono)">${t.current ? '$'+t.current.toFixed(2) : '—'}</span></div>
     <div class="modal-row"><span class="modal-key">Qté simulée</span><span class="modal-val" style="font-family:var(--mono)">${t.qty || '—'}</span></div>
     <div class="modal-row"><span class="modal-key">P&L simulé</span><span class="modal-val">${pnlStr}</span></div>
-    <div class="modal-row"><span class="modal-key">Catalyst</span><span class="modal-val">${catLabel(t.catalyst)}${t.catalystDate ? ' — '+t.catalystDate : ''}</span></div>
+    <div class="modal-row"><span class="modal-key">Catalyseur</span><span class="modal-val">${catalystInfo}</span></div>
     ${t.notes ? `<div class="modal-row" style="flex-direction:column;gap:6px"><span class="modal-key">Thèse</span><div class="modal-notes">${t.notes}</div></div>` : ''}
     ${t.retro ? `<div class="modal-row" style="flex-direction:column;gap:6px"><span class="modal-key">Rétroaction</span><div class="modal-notes" style="border-left:2px solid var(--green)">${t.retro}</div></div>` : ''}
   `;
@@ -841,7 +1299,7 @@ function renderStats() {
   const wins = closed.filter(t => t.current >= t.entry).length;
   const losses = closed.length - wins;
   const wr = closed.length ? Math.round(wins / closed.length * 100) : 0;
-  const totalPnl = trades.reduce((s,t) => s + (calcPnl(t.entry,t.current,t.qty)||0), 0);
+  const totalPnl = trades.reduce((s,t) => s + (calcPnl(t.entry, t.livePrice||t.current, t.qty)||0), 0);
   const avgPct = closed.length
     ? closed.reduce((s,t) => s + (calcPct(t.entry,t.current)||0), 0) / closed.length
     : 0;
@@ -951,7 +1409,8 @@ async function pushToSheets(trade, action) {
       body: JSON.stringify({ action, trade, id: trade ? trade.id : undefined }),
       headers: { 'Content-Type': 'text/plain' }
     });
-    setSyncStatus('✓ Synchronisé — ' + new Date().toLocaleTimeString('fr-CA'), 'var(--green)');
+    const ts = new Date().toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    setSyncStatus('✓ Synchronisé — ' + ts, 'var(--green)');
   } catch(e) {
     setSyncStatus('⚠ Sync échouée : ' + e.message, 'var(--amber)');
   }
@@ -985,11 +1444,14 @@ async function forcePull() {
         current: t.current ? parseFloat(t.current) : null,
         qty: t.qty ? parseInt(t.qty) : null,
         voloi: t.voloi ? parseFloat(t.voloi) : null,
+        livePrice: null,
+        liveChange: null
       }));
       saveData();
       setSyncStatus('✓ ' + trades.length + ' trades chargés depuis Sheets', 'var(--green)');
       showToast('✓ ' + trades.length + ' trades chargés');
       renderJournal();
+      checkAlarms();
     }
   } catch(e) {
     setSyncStatus('✗ Erreur chargement : ' + e.message, 'var(--red)');
@@ -1022,13 +1484,17 @@ function exportJSON() {
 }
 
 function exportCSV() {
-  const headers = ['Date','Ticker','Statut','UOA Type','Vol/OI','Entrée','Actuel','Qté','P&L$','P&L%','Catalyst','Date Catalyst','Thèse','Rétroaction'];
+  const headers = ['Date','Ticker','Statut','UOA Type','Vol/OI','Vol Option','OI Option','Strike','Entrée','Actuel','Prix Live','Chg%','Qté','P&L$','P&L%','Catalyseur','Date Catalyseur','Thèse','Rétroaction'];
   const rows = trades.map(t => {
-    const pnl = calcPnl(t.entry, t.current, t.qty);
-    const pct = calcPct(t.entry, t.current);
+    const pnl = calcPnl(t.entry, t.livePrice||t.current, t.qty);
+    const pct = calcPct(t.entry, t.livePrice||t.current);
     return [
       t.date, t.ticker, t.status, uoaLabel(t.uoaType), t.voloi||'',
-      t.entry||'', t.current||'', t.qty||'',
+      t.optVolume||'', t.optOI||'', t.strike||'',
+      t.entry||'', t.current||'',
+      t.livePrice ? t.livePrice.toFixed(2) : '',
+      t.liveChange ? t.liveChange.toFixed(2) : '',
+      t.qty||'',
       pnl ? pnl.toFixed(2) : '', pct ? pct.toFixed(2) : '',
       catLabel(t.catalyst), t.catalystDate||'',
       '"'+(t.notes||'').replace(/"/g,"'")+'"',
@@ -1053,9 +1519,12 @@ function importJSON(event) {
       if(!Array.isArray(imported)) throw new Error('Format invalide');
       if(confirm(`Importer ${imported.length} trades ? Ils seront ajoutés à tes données actuelles.`)) {
         const existingIds = new Set(trades.map(t => t.id));
-        const newTrades = imported.filter(t => !existingIds.has(t.id));
+        const newTrades = imported.filter(t => !existingIds.has(t.id)).map(t => ({
+          ...t, livePrice: null, liveChange: null
+        }));
         trades = [...trades, ...newTrades];
         saveData();
+        checkAlarms();
         showToast('✓ ' + newTrades.length + ' trades importés');
       }
     } catch(err) {
@@ -1070,6 +1539,7 @@ function clearAll() {
   if(!confirm('⚠ Supprimer TOUS les trades ? Cette action est irréversible.\n\nFais un export JSON d\'abord.')) return;
   trades = [];
   saveData();
+  checkAlarms();
   showToast('Toutes les données effacées');
 }
 
@@ -1085,6 +1555,10 @@ function showToast(msg, isError) {
 // ── INIT ──
 loadData();
 loadSheetUrl();
+checkAlarms();
+
+// Vérifier les alarmes toutes les heures
+setInterval(checkAlarms, 3600000);
 </script>
 </body>
 </html>
