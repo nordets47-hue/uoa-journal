@@ -720,7 +720,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   <div class="card">
     <p class="sec-label">À propos</p>
     <p style="font-size:13px;color:var(--text2);line-height:1.7">
-      UOA Journal v2.4 — Correctifs : strike/catalystDate sauvegardés, anti-doublons sync, colonnes Apps Script complètes.<br><br>
+      UOA Journal v2.5 — Correctifs : dates Sheets ISO converties en YYYY-MM-DD, strike robuste, anti-doublons sync.<br><br>
       <span style="color:var(--text3)">Outil éducatif et de simulation seulement. Pas un conseil financier.</span>
     </p>
   </div>
@@ -820,31 +820,53 @@ function readDate(id) {
 }
 
 // ─────────────────────────────────────────────
+// NORMALISATION DATE
+// Sheets peut retourner "2026-05-29T04:00:00.000Z" au lieu de "2026-05-29"
+// Cette fonction extrait proprement YYYY-MM-DD depuis n'importe quel format
+// ─────────────────────────────────────────────
+function normalizeDate(val) {
+  if (!val || val === '' || val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '') return null;
+  // Format ISO complet → extraire seulement la date
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.substring(0, 10);
+  // Format YYYY-MM-DD → OK tel quel
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Autre format inattendu → null
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// NORMALISATION NOMBRE (robuste : évite 0 → null)
+// ─────────────────────────────────────────────
+function normalizeNum(val, isInt) {
+  if (val === null || val === undefined || val === '') return null;
+  const n = isInt ? parseInt(val, 10) : parseFloat(val);
+  return isNaN(n) ? null : n;
+}
+
+// ─────────────────────────────────────────────
 // MIGRATION : s'assure que chaque trade a TOUS les champs
-// nécessaires (fixes les anciens trades chargés depuis v2.2)
+// et que les types sont corrects (fixes les données Sheets)
 // ─────────────────────────────────────────────
 function migrateTradeFields(t) {
   return {
-    id:           t.id           ?? Date.now(),
-    ticker:       t.ticker       ?? '',
-    date:         t.date         ?? today(),
-    status:       t.status       ?? 'watch',
-    entry:        t.entry        !== undefined ? (t.entry  === '' ? null : parseFloat(t.entry)  || null) : null,
-    current:      t.current      !== undefined ? (t.current === '' ? null : parseFloat(t.current) || null) : null,
-    qty:          t.qty          !== undefined ? (t.qty     === '' ? null : parseInt(t.qty, 10)  || null) : null,
-    voloi:        t.voloi        !== undefined ? (t.voloi   === '' ? null : parseFloat(t.voloi)  || null) : null,
-    optVolume:    t.optVolume    !== undefined ? (t.optVolume === '' ? null : parseInt(t.optVolume, 10) || null) : null,
-    optOI:        t.optOI        !== undefined ? (t.optOI   === '' ? null : parseInt(t.optOI, 10) || null) : null,
-    // ── CHAMPS CRITIQUES ──
-    strike:       (t.strike !== undefined && t.strike !== '' && t.strike !== null)
-                    ? parseFloat(t.strike) : null,
-    catalystDate: (t.catalystDate !== undefined && t.catalystDate !== '' && t.catalystDate !== null)
-                    ? String(t.catalystDate).trim() : null,
-    // ─────────────────────
-    uoaType:      t.uoaType      ?? '',
-    catalyst:     t.catalyst     ?? '',
-    notes:        t.notes        ?? '',
-    retro:        t.retro        ?? '',
+    id:           t.id           ? Number(t.id) : Date.now(),
+    ticker:       t.ticker       ? String(t.ticker).toUpperCase().trim() : '',
+    date:         normalizeDate(t.date) || today(),
+    status:       t.status       || 'watch',
+    entry:        normalizeNum(t.entry,       false),
+    current:      normalizeNum(t.current,     false),
+    qty:          normalizeNum(t.qty,         true),
+    voloi:        normalizeNum(t.voloi,       false),
+    optVolume:    normalizeNum(t.optVolume,   true),
+    optOI:        normalizeNum(t.optOI,       true),
+    strike:       normalizeNum(t.strike,      false),   // ← robuste, 0 reste 0
+    uoaType:      t.uoaType      || '',
+    catalyst:     t.catalyst     || '',
+    catalystDate: normalizeDate(t.catalystDate),        // ← corrige "2026-05-29T04:00:00.000Z"
+    notes:        t.notes        || '',
+    retro:        t.retro        || '',
     livePrice:    t.livePrice    ?? null,
     liveChange:   t.liveChange   ?? null,
   };
