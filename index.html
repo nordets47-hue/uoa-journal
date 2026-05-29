@@ -720,7 +720,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   <div class="card">
     <p class="sec-label">À propos</p>
     <p style="font-size:13px;color:var(--text2);line-height:1.7">
-      UOA Journal v2.3 — Correctifs : sauvegarde strike &amp; date catalyseur, migration données, robustesse localStorage.<br><br>
+      UOA Journal v2.4 — Correctifs : strike/catalystDate sauvegardés, anti-doublons sync, colonnes Apps Script complètes.<br><br>
       <span style="color:var(--text3)">Outil éducatif et de simulation seulement. Pas un conseil financier.</span>
     </p>
   </div>
@@ -1518,7 +1518,7 @@ function renderBreakdown(containerId, closed, labels, keyFn) {
 }
 
 // ─────────────────────────────────────────────
-// GOOGLE SHEETS SYNC
+// GOOGLE SHEETS SYNC v2.4
 // ─────────────────────────────────────────────
 const SHEET_URL_KEY = 'uoa_sheet_url';
 let sheetUrl = '';
@@ -1545,30 +1545,39 @@ function setSyncStatus(msg, color) {
 async function testConnection() {
   if (!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
   const el = document.getElementById('conn-status');
-  el.style.color  = 'var(--text3)';
-  el.textContent  = '⏳ Test en cours...';
+  el.style.color = 'var(--text3)';
+  el.textContent = '⏳ Test en cours...';
   try {
-    const resp = await fetch(sheetUrl, { method: 'GET' });
+    const resp = await fetch(sheetUrl + '?t=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     if (data.trades !== undefined) {
       el.style.color = 'var(--green)';
       el.textContent = '✓ Connexion OK — ' + data.trades.length + ' trades dans Sheets';
-    } else { throw new Error('Réponse inattendue'); }
+    } else if (data.error) {
+      throw new Error(data.error);
+    } else {
+      throw new Error('Réponse inattendue');
+    }
   } catch(e) {
     el.style.color = 'var(--red)';
     el.textContent = '✗ Erreur : ' + e.message;
   }
 }
 
+// ── PUSH (ajout d'un trade) ──
+// Envoie un seul trade vers Sheets à la sauvegarde
 async function pushToSheets(trade, action) {
   if (!sheetUrl) return;
   try {
     setSyncStatus('⏳ Sync en cours...', 'var(--text3)');
-    await fetch(sheetUrl, {
-      method: 'POST',
-      body:    JSON.stringify({ action, trade, id: trade ? trade.id : undefined }),
+    const resp = await fetch(sheetUrl, {
+      method:  'POST',
+      body:    JSON.stringify({ action, trade }),
       headers: { 'Content-Type': 'text/plain' }
     });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
     const ts = new Date().toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     setSyncStatus('✓ Synchronisé — ' + ts, 'var(--green)');
   } catch(e) {
@@ -1576,57 +1585,115 @@ async function pushToSheets(trade, action) {
   }
 }
 
+// ── PUSH DELETE ──
 async function pushDeleteToSheets(id) {
   if (!sheetUrl) return;
   try {
-    await fetch(sheetUrl, {
-      method: 'POST',
+    const resp = await fetch(sheetUrl, {
+      method:  'POST',
       body:    JSON.stringify({ action: 'delete', id }),
       headers: { 'Content-Type': 'text/plain' }
     });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
     setSyncStatus('✓ Suppression synchronisée', 'var(--green)');
   } catch(e) {
-    setSyncStatus('⚠ Sync échouée', 'var(--amber)');
+    setSyncStatus('⚠ Sync échouée : ' + e.message, 'var(--amber)');
   }
 }
 
+// ── FORCE PULL — CORRIGÉ ANTI-DOUBLONS ──
+// Stratégie : Sheets est la source de vérité.
+// On REMPLACE le localStorage complet par ce qui vient de Sheets.
+// On ne "merge" plus — c'était la cause des doublons.
 async function forcePull() {
   if (!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+
+  const btn = document.querySelector('[onclick="forcePull()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Chargement…'; }
   setSyncStatus('⏳ Chargement depuis Sheets...', 'var(--text3)');
+
   try {
     const resp = await fetch(sheetUrl + '?t=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    if (data.trades) {
-      trades = data.trades.map(t => migrateTradeFields({
+
+    if (data.error) throw new Error(data.error);
+
+    if (!data.trades) throw new Error('Pas de données reçues');
+
+    // ── NETTOYAGE ET MIGRATION ──
+    const sheetTrades = data.trades
+      .filter(t => t.id)                         // ignorer lignes sans ID
+      .map(t => migrateTradeFields({
         ...t,
-        id:      Number(t.id),
-        livePrice:  null,
-        liveChange: null
+        id:         Number(t.id),
+        livePrice:  null,                         // on ne garde pas le prix live cross-session
+        liveChange: null,
       }));
-      saveData();
-      setSyncStatus('✓ ' + trades.length + ' trades chargés depuis Sheets', 'var(--green)');
-      showToast('✓ ' + trades.length + ' trades chargés');
-      renderJournal();
-      checkAlarms();
-    }
+
+    // ── DÉDUPLIQUER par ID (sécurité) ──
+    const seen    = new Set();
+    const unique  = sheetTrades.filter(t => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
+
+    // ── REMPLACEMENT COMPLET (pas de merge) ──
+    trades = unique;
+    saveData();
+
+    const ts = new Date().toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    setSyncStatus(`✓ ${unique.length} trades chargés depuis Sheets — ${ts}`, 'var(--green)');
+    showToast(`✓ ${unique.length} trades chargés (${data.trades.length - unique.length} doublons ignorés)`);
+    renderJournal();
+    checkAlarms();
+
   } catch(e) {
     setSyncStatus('✗ Erreur chargement : ' + e.message, 'var(--red)');
+    showToast('✗ Erreur : ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Charger depuis Sheets'; }
   }
 }
 
+// ── FORCE PUSH ──
+// Envoie TOUT le localStorage vers Sheets (sync complète)
+// Sheets est alors écrasé avec les données locales.
 async function forcePush() {
   if (!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+
+  const btn = document.querySelector('[onclick="forcePush()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi…'; }
   setSyncStatus('⏳ Envoi vers Sheets...', 'var(--text3)');
+
   try {
-    await fetch(sheetUrl, {
-      method: 'POST',
-      body:    JSON.stringify({ action: 'sync', trades }),
+    // Dédupliquer avant d'envoyer
+    const seen   = new Set();
+    const unique = trades.filter(t => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
+
+    const resp = await fetch(sheetUrl, {
+      method:  'POST',
+      body:    JSON.stringify({ action: 'sync', trades: unique }),
       headers: { 'Content-Type': 'text/plain' }
     });
-    setSyncStatus('✓ ' + trades.length + ' trades envoyés vers Sheets', 'var(--green)');
-    showToast('✓ Sync complète envoyée');
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    const ts = new Date().toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    setSyncStatus(`✓ ${unique.length} trades envoyés vers Sheets — ${ts}`, 'var(--green)');
+    showToast(`✓ ${unique.length} trades envoyés vers Sheets`);
+
   } catch(e) {
     setSyncStatus('✗ Erreur envoi : ' + e.message, 'var(--red)');
+    showToast('✗ Erreur : ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬆ Envoyer vers Sheets'; }
   }
 }
 
