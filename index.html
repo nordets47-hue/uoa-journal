@@ -195,6 +195,19 @@ input::placeholder, textarea::placeholder { color: var(--text3); }
 }
 .save-msg.show { opacity: 1; }
 
+/* DEBUG BADGE */
+.debug-badge {
+  display: inline-block;
+  background: rgba(46,204,122,0.15);
+  border: 1px solid rgba(46,204,122,0.3);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--green);
+  margin-left: 8px;
+}
+
 /* TABLE */
 .table-wrap { overflow-x: auto; border-radius: var(--radius-lg); border: 1px solid var(--border); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 700px; }
@@ -687,6 +700,18 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   </div>
 
   <div class="card">
+    <p class="sec-label">Diagnostic localStorage</p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1rem;line-height:1.6">
+      Inspecte les données brutes sauvegardées dans le navigateur pour débogage.
+    </p>
+    <div class="data-actions">
+      <button class="btn" onclick="showDiagnostic()">🔍 Voir données brutes</button>
+      <button class="btn" onclick="migrateOldData()">🔧 Migrer données (v2.2 → v2.3)</button>
+    </div>
+    <pre id="diagnostic-output" style="display:none;margin-top:1rem;background:var(--bg3);border-radius:var(--radius);padding:1rem;font-family:var(--mono);font-size:10px;color:var(--text2);overflow-x:auto;max-height:300px;white-space:pre-wrap;word-break:break-all"></pre>
+  </div>
+
+  <div class="card">
     <p class="sec-label">Danger zone</p>
     <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">Supprime toutes les données locales et dans Sheets.</p>
     <button class="btn" style="color:var(--red);border-color:rgba(255,94,94,0.3)" onclick="clearAll()">🗑 Tout effacer</button>
@@ -695,7 +720,7 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
   <div class="card">
     <p class="sec-label">À propos</p>
     <p style="font-size:13px;color:var(--text2);line-height:1.7">
-      UOA Journal v2.2 — Suivi de trades UOA avec prix live Yahoo Finance, strike/Vol/OI option, alarmes catalyseur, et sync Google Sheets.<br><br>
+      UOA Journal v2.3 — Correctifs : sauvegarde strike &amp; date catalyseur, migration données, robustesse localStorage.<br><br>
       <span style="color:var(--text3)">Outil éducatif et de simulation seulement. Pas un conseil financier.</span>
     </p>
   </div>
@@ -717,12 +742,18 @@ tbody tr:hover td { background: rgba(124,111,255,0.05); }
 <div class="toast" id="toast"></div>
 
 <script>
+// ─────────────────────────────────────────────
+// CONSTANTES & ÉTAT
+// ─────────────────────────────────────────────
 const KEY = 'uoa_journal_v2';
 let trades = [];
 
-// ── CORRECTION BUG DATE FUSEAU HORAIRE (UTC vs local) ──
-// toISOString() retourne UTC, ce qui peut décaler d'un jour au Québec (UTC-4/5)
-// On utilise plutôt les composantes locales directement
+// ─────────────────────────────────────────────
+// UTILITAIRES DATE — CORRECTION FUSEAU HORAIRE
+// Safari/iOS interprète "YYYY-MM-DD" comme UTC minuit,
+// ce qui peut décaler d'un jour (UTC-4/5 au Québec).
+// On travaille toujours avec les composantes locales.
+// ─────────────────────────────────────────────
 function today() {
   const d = new Date();
   const y = d.getFullYear();
@@ -731,49 +762,178 @@ function today() {
   return `${y}-${m}-${day}`;
 }
 
-// Formater une date YYYY-MM-DD en format lisible français
 function formatDateFr(dateStr) {
-  if (!dateStr) return '—';
-  const [y, m, d] = dateStr.split('-');
+  if (!dateStr || dateStr.trim() === '') return '—';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const [y, m, d] = parts;
   const mois = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
-  return `${parseInt(d)} ${mois[parseInt(m)-1]} ${y}`;
+  const mi = parseInt(m, 10) - 1;
+  if (mi < 0 || mi > 11) return dateStr;
+  return `${parseInt(d, 10)} ${mois[mi]} ${y}`;
 }
 
-// Comparer deux dates YYYY-MM-DD, retourne nb de jours (positif = dans le futur)
 function daysFromToday(dateStr) {
-  if (!dateStr) return null;
-  const [y,m,d] = dateStr.split('-').map(Number);
-  const target = new Date(y, m-1, d);
+  if (!dateStr || dateStr.trim() === '') return null;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return null;
+  const [y, m, d] = parts.map(Number);
+  if (!y || !m || !d) return null;
+  // Comparaison locale pure — pas de conversion UTC
+  const target = new Date(y, m - 1, d);
   const now = new Date();
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return Math.round((target - todayDate) / 86400000);
 }
 
+// ─────────────────────────────────────────────
+// LECTURE/ÉCRITURE SECURISÉE DES VALEURS DE FORMULAIRE
+// C'est ici qu'était le bug principal :
+//   parseFloat('') → NaN  → NaN || null = null  ✓
+//   parseFloat('0') → 0   → 0 || null   = null  ✗ (bug si strike = 0)
+//   parseInt('')  → NaN → NaN || null   = null  ✓
+// Solution : tester explicitement si la chaîne est vide
+// ─────────────────────────────────────────────
+function readFloat(id) {
+  const val = document.getElementById(id).value.trim();
+  if (val === '' || val === null) return null;
+  const n = parseFloat(val);
+  return isNaN(n) ? null : n;
+}
+
+function readInt(id) {
+  const val = document.getElementById(id).value.trim();
+  if (val === '' || val === null) return null;
+  const n = parseInt(val, 10);
+  return isNaN(n) ? null : n;
+}
+
+function readStr(id) {
+  const val = document.getElementById(id).value.trim();
+  return val === '' ? null : val;
+}
+
+function readDate(id) {
+  // Retourne null si vide, sinon la string YYYY-MM-DD
+  const val = document.getElementById(id).value;
+  return (val && val.trim() !== '') ? val.trim() : null;
+}
+
+// ─────────────────────────────────────────────
+// MIGRATION : s'assure que chaque trade a TOUS les champs
+// nécessaires (fixes les anciens trades chargés depuis v2.2)
+// ─────────────────────────────────────────────
+function migrateTradeFields(t) {
+  return {
+    id:           t.id           ?? Date.now(),
+    ticker:       t.ticker       ?? '',
+    date:         t.date         ?? today(),
+    status:       t.status       ?? 'watch',
+    entry:        t.entry        !== undefined ? (t.entry  === '' ? null : parseFloat(t.entry)  || null) : null,
+    current:      t.current      !== undefined ? (t.current === '' ? null : parseFloat(t.current) || null) : null,
+    qty:          t.qty          !== undefined ? (t.qty     === '' ? null : parseInt(t.qty, 10)  || null) : null,
+    voloi:        t.voloi        !== undefined ? (t.voloi   === '' ? null : parseFloat(t.voloi)  || null) : null,
+    optVolume:    t.optVolume    !== undefined ? (t.optVolume === '' ? null : parseInt(t.optVolume, 10) || null) : null,
+    optOI:        t.optOI        !== undefined ? (t.optOI   === '' ? null : parseInt(t.optOI, 10) || null) : null,
+    // ── CHAMPS CRITIQUES ──
+    strike:       (t.strike !== undefined && t.strike !== '' && t.strike !== null)
+                    ? parseFloat(t.strike) : null,
+    catalystDate: (t.catalystDate !== undefined && t.catalystDate !== '' && t.catalystDate !== null)
+                    ? String(t.catalystDate).trim() : null,
+    // ─────────────────────
+    uoaType:      t.uoaType      ?? '',
+    catalyst:     t.catalyst     ?? '',
+    notes:        t.notes        ?? '',
+    retro:        t.retro        ?? '',
+    livePrice:    t.livePrice    ?? null,
+    liveChange:   t.liveChange   ?? null,
+  };
+}
+
+// ─────────────────────────────────────────────
+// PERSISTANCE
+// ─────────────────────────────────────────────
 function loadData() {
   try {
-    const d = localStorage.getItem(KEY);
-    if (d) trades = JSON.parse(d);
-  } catch(e) { trades = []; }
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migrer TOUS les trades au chargement
+      trades = Array.isArray(parsed) ? parsed.map(migrateTradeFields) : [];
+    }
+  } catch(e) {
+    console.error('loadData error:', e);
+    trades = [];
+  }
 }
 
 function saveData() {
-  try { localStorage.setItem(KEY, JSON.stringify(trades)); } catch(e) {}
+  try {
+    // On sauvegarde en nettoyant les champs livePrice/liveChange
+    // pour éviter les données obsolètes entre sessions
+    const toSave = trades.map(t => {
+      const copy = { ...t };
+      // livePrice et liveChange sont volatils — on les garde pour la session
+      // mais on les conserve dans le localStorage pour ne pas perdre le dernier prix connu
+      return copy;
+    });
+    localStorage.setItem(KEY, JSON.stringify(toSave));
+  } catch(e) {
+    console.error('saveData error:', e);
+    showToast('⚠ Erreur sauvegarde localStorage', true);
+  }
 }
 
+// Fonction de migration manuelle (bouton dans Données)
+function migrateOldData() {
+  const before = trades.length;
+  trades = trades.map(migrateTradeFields);
+  saveData();
+  showToast(`✓ Migration OK — ${before} trades mis à jour`);
+  showDiagnostic();
+}
+
+// Diagnostic
+function showDiagnostic() {
+  const el = document.getElementById('diagnostic-output');
+  el.style.display = 'block';
+  const sample = trades.slice(0, 5).map(t => ({
+    id: t.id,
+    ticker: t.ticker,
+    strike: t.strike,
+    catalystDate: t.catalystDate,
+    catalyst: t.catalyst,
+    status: t.status
+  }));
+  el.textContent =
+    `Trades total : ${trades.length}\n\n` +
+    `5 premiers trades (champs critiques) :\n` +
+    JSON.stringify(sample, null, 2) + '\n\n' +
+    `localStorage key: "${KEY}"\n` +
+    `localStorage size: ~${Math.round((localStorage.getItem(KEY)||'').length / 1024)}KB`;
+}
+
+// ─────────────────────────────────────────────
+// INIT FORMULAIRE
+// ─────────────────────────────────────────────
 document.getElementById('f-date').value = today();
 
-// ── HORLOGE EN TEMPS RÉEL ──
+// ─────────────────────────────────────────────
+// HORLOGE
+// ─────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
-  const timeStr = now.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false });
-  const dateStr = now.toLocaleDateString('fr-CA', { weekday:'short', day:'numeric', month:'short' });
-  document.getElementById('clock-time').textContent = timeStr;
-  document.getElementById('clock-date').textContent = dateStr;
+  document.getElementById('clock-time').textContent =
+    now.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false });
+  document.getElementById('clock-date').textContent =
+    now.toLocaleDateString('fr-CA', { weekday:'short', day:'numeric', month:'short' });
 }
 updateClock();
 setInterval(updateClock, 1000);
 
-// ── TABS ──
+// ─────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────
 function showTab(t) {
   ['add','journal','stats','data'].forEach(x => {
     document.getElementById('panel-'+x).classList.toggle('active', x===t);
@@ -782,73 +942,89 @@ function showTab(t) {
     el.classList.toggle('active', ['add','journal','stats','data'][i]===t);
   });
   if(t==='journal') { renderJournal(); checkAlarms(); }
-  if(t==='stats') renderStats();
+  if(t==='stats')   renderStats();
 }
 
-// ── SAVE TRADE ──
+// ─────────────────────────────────────────────
+// SAVE TRADE — CORRIGÉ
+// Utilise readFloat/readInt/readStr/readDate
+// pour éviter les faux null sur strike et catalystDate
+// ─────────────────────────────────────────────
 function saveTrade() {
-  const ticker = (document.getElementById('f-ticker').value||'').toUpperCase().trim();
-  if(!ticker) { showToast('⚠ Entrez un ticker', true); return; }
+  const ticker = (document.getElementById('f-ticker').value || '').toUpperCase().trim();
+  if (!ticker) { showToast('⚠ Entrez un ticker', true); return; }
 
   const trade = {
-    id: Date.now(),
+    id:          Date.now(),
     ticker,
-    date: document.getElementById('f-date').value || today(),
-    status: document.getElementById('f-status').value,
-    entry: parseFloat(document.getElementById('f-entry').value) || null,
-    current: parseFloat(document.getElementById('f-current').value) || null,
-    qty: parseInt(document.getElementById('f-qty').value) || null,
-    voloi: parseFloat(document.getElementById('f-voloi').value) || null,
-    optVolume: parseInt(document.getElementById('f-opt-volume').value) || null,
-    optOI: parseInt(document.getElementById('f-opt-oi').value) || null,
-    strike: parseFloat(document.getElementById('f-strike').value) || null,
-    uoaType: document.getElementById('f-uoa-type').value,
-    catalyst: document.getElementById('f-catalyst').value,
-    catalystDate: document.getElementById('f-catalyst-date').value,
-    notes: document.getElementById('f-notes').value,
-    retro: document.getElementById('f-retro').value,
-    livePrice: null,
-    liveChange: null
+    date:        readDate('f-date') || today(),
+    status:      document.getElementById('f-status').value,
+    entry:       readFloat('f-entry'),
+    current:     readFloat('f-current'),
+    qty:         readInt('f-qty'),
+    voloi:       readFloat('f-voloi'),
+    optVolume:   readInt('f-opt-volume'),
+    optOI:       readInt('f-opt-oi'),
+    strike:      readFloat('f-strike'),        // ← CORRIGÉ : readFloat au lieu de parseFloat||null
+    uoaType:     document.getElementById('f-uoa-type').value || '',
+    catalyst:    document.getElementById('f-catalyst').value || '',
+    catalystDate: readDate('f-catalyst-date'), // ← CORRIGÉ : readDate retourne null si vide
+    notes:       document.getElementById('f-notes').value || '',
+    retro:       document.getElementById('f-retro').value || '',
+    livePrice:   null,
+    liveChange:  null,
   };
+
+  // Validation visuelle des champs critiques
+  const strikeSaved    = trade.strike      !== null ? '✓' : '—';
+  const catalystSaved  = trade.catalystDate !== null ? '✓' : '—';
+  console.log(`[saveTrade] ${ticker} | strike=${trade.strike} (${strikeSaved}) | catalystDate=${trade.catalystDate} (${catalystSaved})`);
 
   trades.push(trade);
   saveData();
   pushToSheets(trade, 'save');
   checkAlarms();
 
+  // Reset du formulaire
   ['f-ticker','f-entry','f-current','f-qty','f-voloi','f-opt-volume','f-opt-oi','f-strike','f-notes','f-retro','f-catalyst-date'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('f-date').value = today();
-  document.getElementById('f-status').value = 'watch';
+  document.getElementById('f-status').value   = 'watch';
   document.getElementById('f-uoa-type').value = '';
   document.getElementById('f-catalyst').value = '';
 
   const msg = document.getElementById('save-msg');
   msg.classList.add('show');
   setTimeout(() => msg.classList.remove('show'), 2500);
-  showToast('✓ ' + ticker + ' ajouté au journal');
+
+  const details = [
+    trade.strike       ? `strike $${trade.strike}` : null,
+    trade.catalystDate ? `catalyseur ${formatDateFr(trade.catalystDate)}` : null
+  ].filter(Boolean).join(', ');
+  showToast('✓ ' + ticker + ' ajouté' + (details ? ` — ${details}` : ''));
 }
 
-// ── HELPERS ──
+// ─────────────────────────────────────────────
+// HELPERS P&L
+// ─────────────────────────────────────────────
 function calcPnl(entry, current, qty) {
-  if(!entry || !current || !qty) return null;
+  if (entry === null || current === null || qty === null) return null;
+  if (!entry || !current || !qty) return null;
   return (current - entry) * qty;
 }
 function calcPct(entry, current) {
-  if(!entry || !current) return null;
+  if (!entry || !current) return null;
   return (current - entry) / entry * 100;
 }
 function fmtPnl(entry, current, qty) {
   const pnl = calcPnl(entry, current, qty);
   const pct = calcPct(entry, current);
-  if(pnl === null) return '—';
+  if (pnl === null) return '—';
   const cls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-  const s = pnl >= 0 ? '+' : '';
+  const s   = pnl >= 0 ? '+' : '';
   return `<span class="${cls}">${s}${Math.round(pnl)}$ <small>(${s}${pct.toFixed(1)}%)</small></span>`;
 }
-
-// P&L utilisant le prix live si dispo
 function fmtPnlWithStrike(t) {
   const pnlPrice = t.livePrice || t.current;
   return fmtPnl(t.entry, pnlPrice, t.qty);
@@ -856,19 +1032,20 @@ function fmtPnlWithStrike(t) {
 
 // Cellule Strike : affiche strike, prix actuel/live, et écart %
 function renderStrikeCell(t) {
-  if (!t.strike) return '—';
+  if (t.strike === null || t.strike === undefined) return '—';
   const live = t.livePrice || t.current;
   const strikeStr = '$' + t.strike.toFixed(2);
   if (!live) return strikeStr;
-  const diff = live - t.strike;
+  const diff    = live - t.strike;
   const diffPct = (diff / t.strike * 100);
-  const sign = diffPct >= 0 ? '+' : '';
-  const col = diffPct >= 0 ? 'var(--green)' : 'var(--red)';
+  const sign    = diffPct >= 0 ? '+' : '';
+  const col     = diffPct >= 0 ? 'var(--green)' : 'var(--red)';
   return `<div style="display:flex;flex-direction:column;gap:1px">
     <span style="color:var(--text3);font-size:10px">Strike: ${strikeStr}</span>
     <span style="color:${col};font-size:11px">${sign}${diffPct.toFixed(1)}% vs live</span>
   </div>`;
 }
+
 const UOA_LABELS = {
   sweep_calls:'Sweep calls', sweep_puts:'Sweep puts',
   block_calls:'Block calls', block_puts:'Block puts',
@@ -878,89 +1055,80 @@ const CAT_LABELS = {
   earnings:'Earnings', fda:'PDUFA/FDA', ma:'M&A',
   momentum:'Momentum', macro:'Macro', autre:'Autre'
 };
-function uoaLabel(u) { return UOA_LABELS[u] || '—'; }
-function catLabel(c) { return CAT_LABELS[c] || '—'; }
+function uoaLabel(u)  { return UOA_LABELS[u] || '—'; }
+function catLabel(c)  { return CAT_LABELS[c]  || (c ? c : '—'); }
 
 function statusBadge(s) {
-  if(s==='watch') return '<span class="badge b-watch">Watch</span>';
-  if(s==='open')  return '<span class="badge b-open">Ouvert</span>';
+  if (s==='watch') return '<span class="badge b-watch">Watch</span>';
+  if (s==='open')  return '<span class="badge b-open">Ouvert</span>';
   return '<span class="badge b-closed">Fermé</span>';
 }
 function outcomeBadge(t) {
-  if(t.status !== 'closed') return '';
+  if (t.status !== 'closed') return '';
   const pnl = calcPnl(t.entry, t.current, t.qty);
-  if(pnl === null) return '';
+  if (pnl === null) return '';
   return pnl >= 0
     ? ' <span class="badge b-win">✓ Win</span>'
     : ' <span class="badge b-loss">✗ Loss</span>';
 }
 
-// ── PRIX YAHOO FINANCE ──
-// Proxy CORS public pour contourner la restriction navigateur
-const YAHOO_PROXY = 'https://query1.finance.yahoo.com/v8/finance/chart/';
-const CORS_PROXY  = 'https://api.allorigins.win/get?url=';
+// ─────────────────────────────────────────────
+// PRIX YAHOO FINANCE
+// ─────────────────────────────────────────────
+const YAHOO_PROXY  = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const CORS_PROXY   = 'https://api.allorigins.win/get?url=';
 
-let priceCache = {};    // { ticker: { price, changePercent, ts } }
+let priceCache      = {};
 let autoRefreshTimer = null;
-let autoRefreshOn = false;
+let autoRefreshOn   = false;
 
 async function fetchPrice(ticker) {
-  // Cache de 3 min
   const cached = priceCache[ticker];
   if (cached && Date.now() - cached.ts < 180000) return cached;
-
   try {
-    const url = encodeURIComponent(YAHOO_PROXY + ticker + '?interval=1d&range=1d');
+    const url  = encodeURIComponent(YAHOO_PROXY + ticker + '?interval=1d&range=1d');
     const resp = await fetch(CORS_PROXY + url);
     const wrapper = await resp.json();
     const data = JSON.parse(wrapper.contents);
     const meta = data.chart.result[0].meta;
-    const price = meta.regularMarketPrice;
-    const prevClose = meta.chartPreviousClose || meta.previousClose || price;
-    const changePercent = prevClose ? (price - prevClose) / prevClose * 100 : 0;
-    const result = { price, changePercent, ts: Date.now() };
+    const price      = meta.regularMarketPrice;
+    const prevClose  = meta.chartPreviousClose || meta.previousClose || price;
+    const changePct  = prevClose ? (price - prevClose) / prevClose * 100 : 0;
+    const result = { price, changePercent: changePct, ts: Date.now() };
     priceCache[ticker] = result;
     return result;
-  } catch(e) {
-    return null;
-  }
+  } catch(e) { return null; }
 }
 
 async function refreshAllPrices() {
   const btn = document.getElementById('btn-refresh-prices');
-  btn.disabled = true;
+  btn.disabled  = true;
   btn.textContent = '↻ Chargement…';
   document.getElementById('rf-status').textContent = 'Mise à jour en cours…';
 
-  // Tickers uniques des trades actifs
   const tickers = [...new Set(trades.map(t => t.ticker))];
-
-  // Invalider le cache pour forcer le refresh
-  tickers.forEach(tk => { if(priceCache[tk]) priceCache[tk].ts = 0; });
+  tickers.forEach(tk => { if (priceCache[tk]) priceCache[tk].ts = 0; });
 
   let updated = 0;
   for (const tk of tickers) {
     const r = await fetchPrice(tk);
     if (r) {
-      // Mettre à jour le champ "current" des trades OPEN seulement si pas de prix manuel
       trades.forEach(t => {
         if (t.ticker === tk) {
-          t.livePrice = r.price;
+          t.livePrice  = r.price;
           t.liveChange = r.changePercent;
         }
       });
       updated++;
     }
-    // Petit délai anti-throttle
     await new Promise(res => setTimeout(res, 250));
   }
 
   saveData();
   renderJournal();
-  const now = new Date();
-  const ts = now.toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const ts = new Date().toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
   document.getElementById('rf-status').textContent = `Mise à jour ${ts} — ${updated}/${tickers.length} tickers`;
-  btn.disabled = false;
+  btn.disabled    = false;
   btn.textContent = '↻ Refresh prix';
   showToast(`✓ ${updated} tickers mis à jour`);
 }
@@ -969,32 +1137,31 @@ function toggleAutoRefresh() {
   autoRefreshOn = !autoRefreshOn;
   const btn = document.getElementById('btn-auto-refresh');
   if (autoRefreshOn) {
-    btn.textContent = '⏱ Auto ON (5min)';
-    btn.style.color = 'var(--green)';
-    autoRefreshTimer = setInterval(refreshAllPrices, 300000); // 5 min
+    btn.textContent   = '⏱ Auto ON (5min)';
+    btn.style.color   = 'var(--green)';
+    autoRefreshTimer  = setInterval(refreshAllPrices, 300000);
     refreshAllPrices();
   } else {
-    btn.textContent = '⏱ Auto OFF';
-    btn.style.color = '';
+    btn.textContent  = '⏱ Auto OFF';
+    btn.style.color  = '';
     clearInterval(autoRefreshTimer);
   }
 }
 
 function renderLivePrice(t) {
-  if (!t.livePrice) {
-    return `<span class="price-loading">—</span>`;
-  }
+  if (!t.livePrice) return `<span class="price-loading">—</span>`;
   const sign = t.liveChange >= 0 ? '+' : '';
-  const cls = t.liveChange > 0 ? 'pos' : t.liveChange < 0 ? 'neg' : 'neu';
+  const cls  = t.liveChange > 0 ? 'pos' : t.liveChange < 0 ? 'neg' : 'neu';
   return `<div class="price-live">
     <span class="lp">$${t.livePrice.toFixed(2)}</span>
     <span class="lc ${cls}">${sign}${t.liveChange.toFixed(2)}%</span>
   </div>`;
 }
 
-// ── ALARMES CATALYST ──
+// ─────────────────────────────────────────────
+// ALARMES CATALYST
+// ─────────────────────────────────────────────
 function checkAlarms() {
-  const today_str = today();
   const upcoming = trades.filter(t => {
     if (!t.catalystDate || t.status === 'closed') return false;
     const days = daysFromToday(t.catalystDate);
@@ -1002,24 +1169,21 @@ function checkAlarms() {
   });
 
   const todayAlarms = upcoming.filter(t => daysFromToday(t.catalystDate) === 0);
-  const btn = document.getElementById('alarm-btn');
-  const dot = document.getElementById('alarm-dot');
+  const btn    = document.getElementById('alarm-btn');
+  const dot    = document.getElementById('alarm-dot');
   const countEl = document.getElementById('alarm-count');
 
   if (upcoming.length > 0) {
-    dot.style.display = 'block';
+    dot.style.display   = 'block';
     countEl.textContent = upcoming.length;
-    btn.style.color = todayAlarms.length > 0 ? 'var(--amber)' : 'var(--text2)';
+    btn.style.color     = todayAlarms.length > 0 ? 'var(--amber)' : 'var(--text2)';
   } else {
-    dot.style.display = 'none';
+    dot.style.display   = 'none';
     countEl.textContent = '';
-    btn.style.color = '';
+    btn.style.color     = '';
   }
 
-  // Notification navigateur pour les alarmes du jour
-  if (todayAlarms.length > 0) {
-    requestNotificationPermission(todayAlarms);
-  }
+  if (todayAlarms.length > 0) requestNotificationPermission(todayAlarms);
 }
 
 function requestNotificationPermission(todayAlarms) {
@@ -1042,7 +1206,6 @@ function fireAlarmNotifications(alarms) {
     try {
       new Notification(`🔔 UOA Journal — ${t.ticker}`, {
         body: `Catalyseur aujourd'hui : ${catLabel(t.catalyst)}\nTrade en mode ${t.status}`,
-        icon: '',
         tag: key
       });
     } catch(e) {}
@@ -1070,21 +1233,12 @@ function openAlarmModal() {
     html += `<div class="alarm-list">`;
     all.forEach(t => {
       const isToday = t.daysLeft === 0;
-      const isPast = t.daysLeft < 0;
+      const isPast  = t.daysLeft < 0;
       let daysLabel, daysColor;
-      if (isToday) {
-        daysLabel = '📢 AUJOURD\'HUI';
-        daysColor = 'var(--amber)';
-      } else if (isPast) {
-        daysLabel = `Il y a ${Math.abs(t.daysLeft)}j`;
-        daysColor = 'var(--text3)';
-      } else if (t.daysLeft === 1) {
-        daysLabel = '⚠ Demain';
-        daysColor = 'var(--amber)';
-      } else {
-        daysLabel = `Dans ${t.daysLeft}j`;
-        daysColor = t.daysLeft <= 3 ? 'var(--amber)' : 'var(--blue)';
-      }
+      if      (isToday)       { daysLabel = '📢 AUJOURD\'HUI'; daysColor = 'var(--amber)'; }
+      else if (isPast)        { daysLabel = `Il y a ${Math.abs(t.daysLeft)}j`; daysColor = 'var(--text3)'; }
+      else if (t.daysLeft===1){ daysLabel = '⚠ Demain'; daysColor = 'var(--amber)'; }
+      else                    { daysLabel = `Dans ${t.daysLeft}j`; daysColor = t.daysLeft<=3 ? 'var(--amber)' : 'var(--blue)'; }
 
       html += `<div class="alarm-item ${isToday?'today':''} ${isPast?'past':''}">
         <span class="alarm-ticker-badge">${t.ticker}</span>
@@ -1096,18 +1250,16 @@ function openAlarmModal() {
     });
     html += `</div>`;
 
-    // Résumé
     const todayCount = all.filter(t => t.daysLeft === 0).length;
     const soonCount  = all.filter(t => t.daysLeft > 0 && t.daysLeft <= 3).length;
     if (todayCount || soonCount) {
       html += `<p style="font-size:12px;color:var(--amber);margin-top:1rem;font-family:var(--mono);text-align:center">
         ${todayCount ? `⚡ ${todayCount} catalyst aujourd'hui` : ''}
         ${todayCount && soonCount ? ' · ' : ''}
-        ${soonCount ? `⏳ ${soonCount} dans les 3 prochains jours` : ''}
+        ${soonCount  ? `⏳ ${soonCount} dans les 3 prochains jours` : ''}
       </p>`;
     }
 
-    // Option activer notifications
     if ('Notification' in window && Notification.permission !== 'granted') {
       html += `<div style="margin-top:1rem;text-align:center">
         <button class="btn btn-sm btn-accent" onclick="Notification.requestPermission().then(p=>{ if(p==='granted') showToast('✓ Notifications activées'); closeAlarmModal(); })">
@@ -1127,21 +1279,23 @@ function closeAlarmModal(e) {
   }
 }
 
-// ── JOURNAL ──
+// ─────────────────────────────────────────────
+// JOURNAL
+// ─────────────────────────────────────────────
 function renderJournal() {
-  const fTicker = (document.getElementById('filter-ticker').value||'').toUpperCase();
+  const fTicker = (document.getElementById('filter-ticker').value || '').toUpperCase();
   const fStatus = document.getElementById('filter-status').value;
-  const fCat = document.getElementById('filter-catalyst').value;
+  const fCat    = document.getElementById('filter-catalyst').value;
 
   let filtered = trades.filter(t => {
-    if(fTicker && !t.ticker.includes(fTicker)) return false;
-    if(fStatus && t.status !== fStatus) return false;
-    if(fCat && t.catalyst !== fCat) return false;
+    if (fTicker && !t.ticker.includes(fTicker)) return false;
+    if (fStatus && t.status !== fStatus)        return false;
+    if (fCat    && t.catalyst !== fCat)         return false;
     return true;
   }).sort((a,b) => b.id - a.id);
 
   const tbody = document.getElementById('journal-body');
-  if(!filtered.length) {
+  if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="11">
       <div class="empty-state">
         <div class="empty-icon">📋</div>
@@ -1151,26 +1305,26 @@ function renderJournal() {
   }
 
   tbody.innerHTML = filtered.map(t => {
-    const days = t.catalystDate ? daysFromToday(t.catalystDate) : null;
+    const days = (t.catalystDate) ? daysFromToday(t.catalystDate) : null;
     const alarmBadge = (days !== null && days >= 0 && days <= 1 && t.status !== 'closed')
       ? ` <span class="badge b-alert">${days===0?'⚡ Aujourd\'hui':'⚠ Demain'}</span>`
       : '';
 
-    // P&L : utilise le prix live si disponible, sinon le prix "current" manuel
-    const livePx = t.livePrice;
-    const pnlPrice = livePx || t.current;
-
     return `<tr>
-      <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${t.date}</td>
+      <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${t.date || '—'}</td>
       <td class="ticker-cell">${t.ticker}</td>
       <td>${statusBadge(t.status)}${outcomeBadge(t)}</td>
       <td style="font-size:12px;color:var(--text2)">${uoaLabel(t.uoaType)}</td>
-      <td style="font-family:var(--mono);font-size:12px">${t.voloi ? t.voloi.toFixed(1) : '—'}</td>
-      <td style="font-family:var(--mono);font-size:12px">${t.entry ? '$'+t.entry.toFixed(2) : '—'}</td>
+      <td style="font-family:var(--mono);font-size:12px">${t.voloi !== null && t.voloi !== undefined ? t.voloi.toFixed(1) : '—'}</td>
+      <td style="font-family:var(--mono);font-size:12px">${t.entry !== null ? '$'+t.entry.toFixed(2) : '—'}</td>
       <td>${renderLivePrice(t)}</td>
       <td>${fmtPnlWithStrike(t)}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${renderStrikeCell(t)}</td>
-      <td style="font-size:12px;color:var(--text2)">${catLabel(t.catalyst)}${t.catalystDate ? '<br><span style="font-family:var(--mono);font-size:10px;color:var(--text3)">'+formatDateFr(t.catalystDate)+'</span>' : ''}${alarmBadge}</td>
+      <td style="font-size:12px;color:var(--text2)">
+        ${catLabel(t.catalyst)}
+        ${t.catalystDate ? '<br><span style="font-family:var(--mono);font-size:10px;color:var(--text3)">'+formatDateFr(t.catalystDate)+'</span>' : ''}
+        ${alarmBadge}
+      </td>
       <td>
         <div style="display:flex;gap:4px">
           <button class="btn btn-sm btn-icon" onclick="viewTrade(${t.id})" title="Détails">👁</button>
@@ -1182,9 +1336,11 @@ function renderJournal() {
   }).join('');
 }
 
-// ── CRUD ──
+// ─────────────────────────────────────────────
+// CRUD
+// ─────────────────────────────────────────────
 function deleteTrade(id) {
-  if(!confirm('Supprimer ce trade ?')) return;
+  if (!confirm('Supprimer ce trade ?')) return;
   trades = trades.filter(t => t.id !== id);
   saveData();
   pushDeleteToSheets(id);
@@ -1195,32 +1351,35 @@ function deleteTrade(id) {
 
 function editTrade(id) {
   const t = trades.find(x => x.id === id);
-  if(!t) return;
-  document.getElementById('f-ticker').value = t.ticker;
-  document.getElementById('f-date').value = t.date;
-  document.getElementById('f-status').value = t.status;
-  document.getElementById('f-entry').value = t.entry || '';
-  document.getElementById('f-current').value = t.current || '';
-  document.getElementById('f-qty').value = t.qty || '';
-  document.getElementById('f-voloi').value = t.voloi || '';
-  document.getElementById('f-opt-volume').value = t.optVolume || '';
-  document.getElementById('f-opt-oi').value = t.optOI || '';
-  document.getElementById('f-strike').value = t.strike || '';
-  document.getElementById('f-uoa-type').value = t.uoaType || '';
-  document.getElementById('f-catalyst').value = t.catalyst || '';
-  document.getElementById('f-catalyst-date').value = t.catalystDate || '';
-  document.getElementById('f-notes').value = t.notes || '';
-  document.getElementById('f-retro').value = t.retro || '';
+  if (!t) return;
+  document.getElementById('f-ticker').value        = t.ticker      || '';
+  document.getElementById('f-date').value          = t.date        || today();
+  document.getElementById('f-status').value        = t.status      || 'watch';
+  document.getElementById('f-entry').value         = t.entry       !== null ? t.entry       : '';
+  document.getElementById('f-current').value       = t.current     !== null ? t.current     : '';
+  document.getElementById('f-qty').value           = t.qty         !== null ? t.qty         : '';
+  document.getElementById('f-voloi').value         = t.voloi       !== null ? t.voloi       : '';
+  document.getElementById('f-opt-volume').value    = t.optVolume   !== null ? t.optVolume   : '';
+  document.getElementById('f-opt-oi').value        = t.optOI       !== null ? t.optOI       : '';
+  document.getElementById('f-strike').value        = t.strike      !== null ? t.strike      : '';  // ← CORRIGÉ
+  document.getElementById('f-uoa-type').value      = t.uoaType     || '';
+  document.getElementById('f-catalyst').value      = t.catalyst    || '';
+  document.getElementById('f-catalyst-date').value = t.catalystDate !== null ? t.catalystDate : '';  // ← CORRIGÉ
+  document.getElementById('f-notes').value         = t.notes       || '';
+  document.getElementById('f-retro').value         = t.retro       || '';
+  // Supprimer le trade de la liste (sera re-sauvegardé via saveTrade)
   trades = trades.filter(x => x.id !== id);
   saveData();
   showTab('add');
   showToast('Trade chargé — modifie et sauvegarde');
 }
 
-// ── MODAL ──
+// ─────────────────────────────────────────────
+// MODAL DÉTAIL
+// ─────────────────────────────────────────────
 function viewTrade(id) {
   const t = trades.find(x => x.id === id);
-  if(!t) return;
+  if (!t) return;
   const pnl = calcPnl(t.entry, t.livePrice || t.current, t.qty);
   const pct = calcPct(t.entry, t.livePrice || t.current);
   const pnlStr = pnl !== null
@@ -1232,9 +1391,9 @@ function viewTrade(id) {
   if (t.catalystDate) {
     catalystInfo += ` — ${formatDateFr(t.catalystDate)}`;
     if (days !== null) {
-      if (days === 0) catalystInfo += ' <span class="badge b-alert">Aujourd\'hui</span>';
-      else if (days > 0) catalystInfo += ` <span style="color:var(--text3);font-size:11px">(dans ${days}j)</span>`;
-      else catalystInfo += ` <span style="color:var(--text3);font-size:11px">(il y a ${Math.abs(days)}j)</span>`;
+      if      (days === 0) catalystInfo += ' <span class="badge b-alert">Aujourd\'hui</span>';
+      else if (days > 0)   catalystInfo += ` <span style="color:var(--text3);font-size:11px">(dans ${days}j)</span>`;
+      else                 catalystInfo += ` <span style="color:var(--text3);font-size:11px">(il y a ${Math.abs(days)}j)</span>`;
     }
   }
 
@@ -1246,11 +1405,11 @@ function viewTrade(id) {
         </span>
       </div>` : '';
 
-  const strikeDiff = (t.strike && (t.livePrice || t.current))
+  const strikeDiff = (t.strike !== null && t.strike !== undefined && (t.livePrice || t.current))
     ? (() => {
         const live = t.livePrice || t.current;
-        const d = (live - t.strike) / t.strike * 100;
-        const s = d >= 0 ? '+' : '';
+        const d    = (live - t.strike) / t.strike * 100;
+        const s    = d >= 0 ? '+' : '';
         return ` <span class="${d>=0?'pnl-pos':'pnl-neg'}" style="font-size:12px">${s}${d.toFixed(1)}% vs live</span>`;
       })() : '';
 
@@ -1271,13 +1430,13 @@ function viewTrade(id) {
     </div>
     <div class="modal-row"><span class="modal-key">Date signal</span><span class="modal-val">${formatDateFr(t.date)}</span></div>
     <div class="modal-row"><span class="modal-key">Type UOA</span><span class="modal-val">${uoaLabel(t.uoaType)}</span></div>
-    <div class="modal-row"><span class="modal-key">Vol/OI Ratio</span><span class="modal-val" style="font-family:var(--mono)">${t.voloi ? t.voloi.toFixed(1) : '—'}</span></div>
+    <div class="modal-row"><span class="modal-key">Vol/OI Ratio</span><span class="modal-val" style="font-family:var(--mono)">${t.voloi !== null ? t.voloi.toFixed(1) : '—'}</span></div>
     ${optVolumeRow}
     ${optOIRow}
-    <div class="modal-row"><span class="modal-key">Prix strike</span><span class="modal-val" style="font-family:var(--mono)">${t.strike ? '$'+t.strike.toFixed(2)+strikeDiff : '—'}</span></div>
-    <div class="modal-row"><span class="modal-key">Prix entrée</span><span class="modal-val" style="font-family:var(--mono)">${t.entry ? '$'+t.entry.toFixed(2) : '—'}</span></div>
+    <div class="modal-row"><span class="modal-key">Prix strike</span><span class="modal-val" style="font-family:var(--mono)">${t.strike !== null && t.strike !== undefined ? '$'+t.strike.toFixed(2)+strikeDiff : '—'}</span></div>
+    <div class="modal-row"><span class="modal-key">Prix entrée</span><span class="modal-val" style="font-family:var(--mono)">${t.entry !== null ? '$'+t.entry.toFixed(2) : '—'}</span></div>
     ${livePriceRow}
-    <div class="modal-row"><span class="modal-key">Prix manuel/sortie</span><span class="modal-val" style="font-family:var(--mono)">${t.current ? '$'+t.current.toFixed(2) : '—'}</span></div>
+    <div class="modal-row"><span class="modal-key">Prix manuel/sortie</span><span class="modal-val" style="font-family:var(--mono)">${t.current !== null ? '$'+t.current.toFixed(2) : '—'}</span></div>
     <div class="modal-row"><span class="modal-key">Qté simulée</span><span class="modal-val" style="font-family:var(--mono)">${t.qty || '—'}</span></div>
     <div class="modal-row"><span class="modal-key">P&L simulé</span><span class="modal-val">${pnlStr}</span></div>
     <div class="modal-row"><span class="modal-key">Catalyseur</span><span class="modal-val">${catalystInfo}</span></div>
@@ -1288,19 +1447,21 @@ function viewTrade(id) {
 }
 
 function closeModal(e) {
-  if(!e || e.target === document.getElementById('modal-overlay')) {
+  if (!e || e.target === document.getElementById('modal-overlay')) {
     document.getElementById('modal-overlay').classList.remove('open');
   }
 }
 
-// ── STATS ──
+// ─────────────────────────────────────────────
+// STATS
+// ─────────────────────────────────────────────
 function renderStats() {
   const closed = trades.filter(t => t.status === 'closed' && t.entry && t.current);
-  const wins = closed.filter(t => t.current >= t.entry).length;
+  const wins   = closed.filter(t => t.current >= t.entry).length;
   const losses = closed.length - wins;
-  const wr = closed.length ? Math.round(wins / closed.length * 100) : 0;
+  const wr     = closed.length ? Math.round(wins / closed.length * 100) : 0;
   const totalPnl = trades.reduce((s,t) => s + (calcPnl(t.entry, t.livePrice||t.current, t.qty)||0), 0);
-  const avgPct = closed.length
+  const avgPct   = closed.length
     ? closed.reduce((s,t) => s + (calcPct(t.entry,t.current)||0), 0) / closed.length
     : 0;
 
@@ -1318,27 +1479,27 @@ function renderStats() {
     </div>`).join('');
 
   renderBreakdown('catalyst-breakdown', closed, CAT_LABELS, t => t.catalyst);
-  renderBreakdown('uoa-breakdown', closed, UOA_LABELS, t => t.uoaType);
+  renderBreakdown('uoa-breakdown',      closed, UOA_LABELS, t => t.uoaType);
 }
 
 function renderBreakdown(containerId, closed, labels, keyFn) {
   const container = document.getElementById(containerId);
-  const groups = {};
+  const groups    = {};
   closed.forEach(t => {
     const k = keyFn(t) || '';
-    if(!k) return;
-    if(!groups[k]) groups[k] = [];
+    if (!k) return;
+    if (!groups[k]) groups[k] = [];
     groups[k].push(t);
   });
   const keys = Object.keys(groups);
-  if(!keys.length) {
-    container.innerHTML = '<p style="font-size:13px;color:var(--text3)">Pas encore assez de trades fermés pour calculer les corrélations.</p>';
+  if (!keys.length) {
+    container.innerHTML = '<p style="font-size:13px;color:var(--text3)">Pas encore assez de trades fermés.</p>';
     return;
   }
   const rows = keys.map(k => {
-    const g = groups[k];
-    const w = g.filter(t => t.current >= t.entry).length;
-    const wr = Math.round(w / g.length * 100);
+    const g   = groups[k];
+    const w   = g.filter(t => t.current >= t.entry).length;
+    const wr  = Math.round(w / g.length * 100);
     const avg = g.reduce((s,t) => s + (calcPct(t.entry,t.current)||0), 0) / g.length;
     const cls = avg >= 0 ? 'pnl-pos' : 'pnl-neg';
     return `<tr>
@@ -1348,7 +1509,6 @@ function renderBreakdown(containerId, closed, labels, keyFn) {
       <td><span class="${cls}" style="font-family:var(--mono)">${avg>=0?'+':''}${avg.toFixed(1)}%</span></td>
     </tr>`;
   }).join('');
-
   container.innerHTML = `
     <div class="table-wrap">
     <table>
@@ -1357,13 +1517,15 @@ function renderBreakdown(containerId, closed, labels, keyFn) {
     </table></div>`;
 }
 
-// ── GOOGLE SHEETS SYNC ──
+// ─────────────────────────────────────────────
+// GOOGLE SHEETS SYNC
+// ─────────────────────────────────────────────
 const SHEET_URL_KEY = 'uoa_sheet_url';
 let sheetUrl = '';
 
 function loadSheetUrl() {
   sheetUrl = localStorage.getItem(SHEET_URL_KEY) || '';
-  if(sheetUrl) document.getElementById('sheets-url').value = sheetUrl;
+  if (sheetUrl) document.getElementById('sheets-url').value = sheetUrl;
 }
 
 function saveSheetUrl() {
@@ -1376,24 +1538,22 @@ function saveSheetUrl() {
 function setSyncStatus(msg, color) {
   const el = document.getElementById('sync-status-bar');
   el.style.display = 'block';
-  el.style.color = color || 'var(--text3)';
-  el.textContent = msg;
+  el.style.color   = color || 'var(--text3)';
+  el.textContent   = msg;
 }
 
 async function testConnection() {
-  if(!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+  if (!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
   const el = document.getElementById('conn-status');
-  el.style.color = 'var(--text3)';
-  el.textContent = '⏳ Test en cours...';
+  el.style.color  = 'var(--text3)';
+  el.textContent  = '⏳ Test en cours...';
   try {
     const resp = await fetch(sheetUrl, { method: 'GET' });
     const data = await resp.json();
-    if(data.trades !== undefined) {
+    if (data.trades !== undefined) {
       el.style.color = 'var(--green)';
       el.textContent = '✓ Connexion OK — ' + data.trades.length + ' trades dans Sheets';
-    } else {
-      throw new Error('Réponse inattendue');
-    }
+    } else { throw new Error('Réponse inattendue'); }
   } catch(e) {
     el.style.color = 'var(--red)';
     el.textContent = '✗ Erreur : ' + e.message;
@@ -1401,12 +1561,12 @@ async function testConnection() {
 }
 
 async function pushToSheets(trade, action) {
-  if(!sheetUrl) return;
+  if (!sheetUrl) return;
   try {
     setSyncStatus('⏳ Sync en cours...', 'var(--text3)');
     await fetch(sheetUrl, {
       method: 'POST',
-      body: JSON.stringify({ action, trade, id: trade ? trade.id : undefined }),
+      body:    JSON.stringify({ action, trade, id: trade ? trade.id : undefined }),
       headers: { 'Content-Type': 'text/plain' }
     });
     const ts = new Date().toLocaleTimeString('fr-CA', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -1417,11 +1577,11 @@ async function pushToSheets(trade, action) {
 }
 
 async function pushDeleteToSheets(id) {
-  if(!sheetUrl) return;
+  if (!sheetUrl) return;
   try {
     await fetch(sheetUrl, {
       method: 'POST',
-      body: JSON.stringify({ action: 'delete', id }),
+      body:    JSON.stringify({ action: 'delete', id }),
       headers: { 'Content-Type': 'text/plain' }
     });
     setSyncStatus('✓ Suppression synchronisée', 'var(--green)');
@@ -1431,20 +1591,16 @@ async function pushDeleteToSheets(id) {
 }
 
 async function forcePull() {
-  if(!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+  if (!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
   setSyncStatus('⏳ Chargement depuis Sheets...', 'var(--text3)');
   try {
     const resp = await fetch(sheetUrl + '?t=' + Date.now());
     const data = await resp.json();
-    if(data.trades) {
-      trades = data.trades.map(t => ({
+    if (data.trades) {
+      trades = data.trades.map(t => migrateTradeFields({
         ...t,
-        id: Number(t.id),
-        entry: t.entry ? parseFloat(t.entry) : null,
-        current: t.current ? parseFloat(t.current) : null,
-        qty: t.qty ? parseInt(t.qty) : null,
-        voloi: t.voloi ? parseFloat(t.voloi) : null,
-        livePrice: null,
+        id:      Number(t.id),
+        livePrice:  null,
         liveChange: null
       }));
       saveData();
@@ -1459,12 +1615,12 @@ async function forcePull() {
 }
 
 async function forcePush() {
-  if(!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
+  if (!sheetUrl) { showToast('⚠ Configure l\'URL d\'abord', true); return; }
   setSyncStatus('⏳ Envoi vers Sheets...', 'var(--text3)');
   try {
     await fetch(sheetUrl, {
       method: 'POST',
-      body: JSON.stringify({ action: 'sync', trades }),
+      body:    JSON.stringify({ action: 'sync', trades }),
       headers: { 'Content-Type': 'text/plain' }
     });
     setSyncStatus('✓ ' + trades.length + ' trades envoyés vers Sheets', 'var(--green)');
@@ -1474,11 +1630,13 @@ async function forcePush() {
   }
 }
 
-// ── EXPORT / IMPORT ──
+// ─────────────────────────────────────────────
+// EXPORT / IMPORT
+// ─────────────────────────────────────────────
 function exportJSON() {
   const blob = new Blob([JSON.stringify(trades, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
   a.href = url; a.download = 'uoa_journal_backup_' + today() + '.json'; a.click();
   showToast('Backup JSON exporté');
 }
@@ -1490,38 +1648,40 @@ function exportCSV() {
     const pct = calcPct(t.entry, t.livePrice||t.current);
     return [
       t.date, t.ticker, t.status, uoaLabel(t.uoaType), t.voloi||'',
-      t.optVolume||'', t.optOI||'', t.strike||'',
+      t.optVolume||'', t.optOI||'',
+      t.strike !== null && t.strike !== undefined ? t.strike : '',
       t.entry||'', t.current||'',
-      t.livePrice ? t.livePrice.toFixed(2) : '',
-      t.liveChange ? t.liveChange.toFixed(2) : '',
+      t.livePrice   ? t.livePrice.toFixed(2)   : '',
+      t.liveChange  ? t.liveChange.toFixed(2)  : '',
       t.qty||'',
       pnl ? pnl.toFixed(2) : '', pct ? pct.toFixed(2) : '',
-      catLabel(t.catalyst), t.catalystDate||'',
+      catLabel(t.catalyst),
+      t.catalystDate || '',
       '"'+(t.notes||'').replace(/"/g,"'")+'"',
       '"'+(t.retro||'').replace(/"/g,"'")+'"'
     ].join(',');
   });
-  const csv = [headers.join(','), ...rows].join('\n');
+  const csv  = [headers.join(','), ...rows].join('\n');
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
   a.href = url; a.download = 'uoa_journal_' + today() + '.csv'; a.click();
   showToast('CSV exporté');
 }
 
 function importJSON(event) {
   const file = event.target.files[0];
-  if(!file) return;
+  if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
     try {
       const imported = JSON.parse(e.target.result);
-      if(!Array.isArray(imported)) throw new Error('Format invalide');
-      if(confirm(`Importer ${imported.length} trades ? Ils seront ajoutés à tes données actuelles.`)) {
+      if (!Array.isArray(imported)) throw new Error('Format invalide');
+      if (confirm(`Importer ${imported.length} trades ? Ils seront ajoutés à tes données actuelles.`)) {
         const existingIds = new Set(trades.map(t => t.id));
-        const newTrades = imported.filter(t => !existingIds.has(t.id)).map(t => ({
-          ...t, livePrice: null, liveChange: null
-        }));
+        const newTrades   = imported
+          .filter(t => !existingIds.has(t.id))
+          .map(t => migrateTradeFields({ ...t, livePrice: null, liveChange: null }));
         trades = [...trades, ...newTrades];
         saveData();
         checkAlarms();
@@ -1536,28 +1696,30 @@ function importJSON(event) {
 }
 
 function clearAll() {
-  if(!confirm('⚠ Supprimer TOUS les trades ? Cette action est irréversible.\n\nFais un export JSON d\'abord.')) return;
+  if (!confirm('⚠ Supprimer TOUS les trades ? Cette action est irréversible.\n\nFais un export JSON d\'abord.')) return;
   trades = [];
   saveData();
   checkAlarms();
   showToast('Toutes les données effacées');
 }
 
-// ── TOAST ──
+// ─────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────
 function showToast(msg, isError) {
-  const t = document.getElementById('toast');
+  const t      = document.getElementById('toast');
   t.textContent = msg;
   t.style.color = isError ? 'var(--red)' : 'var(--green)';
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2800);
 }
 
-// ── INIT ──
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
 loadData();
 loadSheetUrl();
 checkAlarms();
-
-// Vérifier les alarmes toutes les heures
 setInterval(checkAlarms, 3600000);
 </script>
 </body>
